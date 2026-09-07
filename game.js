@@ -14,13 +14,13 @@ $('#battery-status').textContent=tableUsed?(battery?'Battery ready · +50 HP':'B
 function finish(won){active=false;lockedGhost=null;release();$('#win small').textContent=won?'ROOM CLEAR':'POWER DEPLETED';$('#win h2').textContent=won?'A tidy little haunting.':'Robot offline.';$('#win p').textContent=won?'Three ghosts safely bottled. '+player.hp+' HP remaining.':'The ghosts got you. Restart with 100 HP and a fresh battery.';$('#again').textContent=won?'Play again':'Try again';$('#win').hidden=false}
 function reset(){
 lockedGhost=null;player={x:340*ROOM_SCALE,y:526*ROOM_SCALE,a:-Math.PI/2,hp:100,hurt:0};particles=[];scare=0;time=0;caught=0;active=true;vac=false;keys={};joy={x:0,y:0};flashTimer=0;cooldown=0;battery=null;tableUsed=false;
-ghosts=colors.map((color,i)=>({x:[210,505,500][i]*ROOM_SCALE,y:[215,228,465][i]*ROOM_SCALE,state:'warning',wait:.45+i*.35,color,hp:100,stun:0,caught:false,seed:i*2.3,noSuction:0,touching:false,attackTime:0}));
+ghosts=colors.map((color,i)=>({x:[210,505,500][i]*ROOM_SCALE,y:[215,228,465][i]*ROOM_SCALE,state:'warning',wait:.45+i*.35,color,hp:100,stun:0,caught:false,seed:i*2.3,noSuction:0,touching:false,attackTime:0,locked:false}));
 $('#win').hidden=true;$('#knob').style.transform='';$('#vacuum').classList.remove('active');$('#fill').style.width='0%';$('#label').textContent='AIM → FLASH TO LOCK → VACUUM';say('Ghosts can hurt you. Bump the green-marked table for a battery.',5);ui();
 }
 function inBeam(g,range=250,angle=.48){const dx=g.x-player.x,dy=g.y-player.y;return Math.hypot(dx,dy)<range&&Math.cos(Math.atan2(dy,dx)-player.a)>Math.cos(angle)}
 function lockValid(){return lockedGhost&&!lockedGhost.caught&&lockedGhost.stun>0&&lockedGhost.state==='roam'&&Math.hypot(lockedGhost.x-player.x,lockedGhost.y-player.y)<300}
 function target(){if(lockValid())return lockedGhost;return ghosts.filter(g=>!g.caught&&g.state!=='warning'&&inBeam(g)).sort((a,b)=>Math.hypot(a.x-player.x,a.y-player.y)-Math.hypot(b.x-player.x,b.y-player.y))[0]}
-function flash(){if(!active||cooldown>0)return;cooldown=1.5;flashTimer=.25;tone(620,.15);const hits=ghosts.filter(g=>!g.caught&&g.state!=='warning'&&inBeam(g,240,.52)).sort((a,b)=>Math.hypot(a.x-player.x,a.y-player.y)-Math.hypot(b.x-player.x,b.y-player.y));hits.forEach(g=>{g.state='roam';g.stun=4.5;burst(g.x,g.y,g.color,16)});if(hits.length){lockedGhost=hits[0];player.a=Math.atan2(lockedGhost.y-player.y,lockedGhost.x-player.x)}say(hits.length?'Ghost locked! Hold VACUUM before it relocates.':'No hit. Aim at a ghost, then FLASH.',2)}
+function flash(){if(!active||cooldown>0)return;cooldown=1.5;flashTimer=.25;tone(620,.15);const hits=ghosts.filter(g=>!g.caught&&g.state!=='warning'&&inBeam(g,240,.52)).sort((a,b)=>Math.hypot(a.x-player.x,a.y-player.y)-Math.hypot(b.x-player.x,b.y-player.y));hits.forEach(g=>{g.state='roam';g.stun=4.5;g.locked=true;g.noSuction=0;burst(g.x,g.y,g.color,16)});if(hits.length){lockedGhost=hits[0];player.a=Math.atan2(lockedGhost.y-player.y,lockedGhost.x-player.x)}say(hits.length?'Ghost locked! Hold VACUUM before it relocates.':'No hit. Aim at a ghost, then FLASH.',2)}
 function spawnBattery(){
 if(tableUsed)return;tableUsed=true;
 // Eject on the side the robot touched, into reachable floor space.
@@ -35,7 +35,7 @@ function respawn(g){
 if(g.caught)return;const old={x:g.x,y:g.y};let point=null;
 for(let i=0;i<80;i++){let x,y;if(i<50&&Math.random()<.7){const a=Math.random()*Math.PI*2,d=210+Math.random()*240;x=player.x+Math.cos(a)*d;y=player.y+Math.sin(a)*d}else{x=bounds.left+Math.random()*(bounds.right-bounds.left);y=bounds.top+Math.random()*(bounds.bottom-bounds.top)}if(x<bounds.left||x>bounds.right||y<bounds.top||y>bounds.bottom||blocked(x,y,40)||Math.hypot(x-player.x,y-player.y)<175||Math.hypot(x-old.x,y-old.y)<200||ghosts.some(h=>h!==g&&!h.caught&&Math.hypot(x-h.x,y-h.y)<85))continue;point={x,y};break}
 if(!point){for(let x=bounds.left+50;x<bounds.right&&!point;x+=95)for(let y=bounds.top+50;y<bounds.bottom;y+=95)if(!blocked(x,y,40)&&Math.hypot(x-player.x,y-player.y)>175&&Math.hypot(x-old.x,y-old.y)>200){point={x,y};break}}
-if(!point)return;burst(g.x,g.y,g.color,15);if(lockedGhost===g)lockedGhost=null;Object.assign(g,point,{hp:100,stun:0,state:'warning',wait:.35,noSuction:0,touching:false,attackTime:0});burst(g.x,g.y,g.color,15);
+if(!point)return;burst(g.x,g.y,g.color,15);if(lockedGhost===g)lockedGhost=null;Object.assign(g,point,{hp:100,stun:0,state:'warning',wait:.35,noSuction:0,touching:false,attackTime:0,locked:false});burst(g.x,g.y,g.color,15);
 }
 function contact(g){const touching=!g.caught&&g.state!=='warning'&&g.stun<=0&&Math.hypot(g.x-player.x,g.y-player.y)<45;
 // One hit per contact, rather than subtracting health on every animation frame.
@@ -47,7 +47,7 @@ if(battery){battery.age+=dt;if(battery.age>.35&&player.hp<100&&Math.hypot(player
 const g=target();const linked=!!(g&&vac&&g.stun>0&&inBeam(g));
 if(linked){g.noSuction=0;g.stun=Math.max(g.stun,.4);const dx=g.x-player.x,dy=g.y-player.y,d=Math.hypot(dx,dy)||1;g.hp-=dt*29;g.x-=dx/d*dt*23;g.y-=dy/d*dt*23;if(Math.random()<.4)particles.push({x:g.x,y:g.y,vx:-dx*2,vy:-dy*2,life:.45,color:g.color});if(g.hp<=0){g.caught=true;if(lockedGhost===g)lockedGhost=null;caught++;burst(g.x,g.y,g.color,40);tone(880,.3);say('Ghost bottled!',2);ui();if(caught===3){finish(true);return}}}
 for(const h of ghosts){if(h.caught)continue;
-if(!(linked&&h===g)){h.noSuction+=dt;if(h.noSuction>2){const wasLocked=lockedGhost===h;respawn(h);if(wasLocked)say('It escaped! Keep suction going to stop it relocating.',2);continue}h.stun=Math.max(0,h.stun-dt)}
+if(h.locked&&!(linked&&h===g)){h.noSuction+=dt;if(h.noSuction>2){const wasLocked=lockedGhost===h;respawn(h);if(wasLocked)say('It escaped! Keep suction going to stop it relocating.',2);continue}h.stun=Math.max(0,h.stun-dt);if(h.stun<=0)h.locked=false}
 if(h.state==='warning'){h.wait-=dt;if(h.wait<=0){h.state='roam';h.attackTime=0}continue}
 contact(h);if(!active)return;if(h.stun>0)continue;
 const dx=player.x-h.x,dy=player.y-h.y,d=Math.hypot(dx,dy)||1;h.attackTime-=dt;
