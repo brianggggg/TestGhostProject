@@ -1,0 +1,45 @@
+import * as THREE from './three.module.js';
+import {WORLD,ROOM_GROWTH,healthTable} from './room.js';
+export function createHaunt(canvas){
+const renderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:false});renderer.setPixelRatio(Math.min(devicePixelRatio||1,1.7));renderer.setSize(720,720,false);renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.25;
+const scene=new THREE.Scene();scene.background=new THREE.Color('#080c15');scene.fog=new THREE.FogExp2('#080c15',.026);
+const camera=new THREE.PerspectiveCamera(47,1,.1,70);const scale=60,world=WORLD;const px=x=>(x-world/2)/scale;
+const mat=(color,extra={})=>new THREE.MeshStandardMaterial({color,roughness:.75,...extra});
+const wood=new THREE.TextureLoader().load('wood.png');wood.colorSpace=THREE.SRGBColorSpace;wood.wrapS=wood.wrapT=THREE.RepeatWrapping;wood.repeat.set(2,2);wood.anisotropy=4;
+const timber=mat('#82745b',{map:wood}),darkwood=mat('#4b3a30',{map:wood}),metal=mat('#8caaa6',{metalness:.65,roughness:.37}),black=mat('#101b26'),brass=mat('#c39250',{metalness:.55});
+function box(parent,x,y,z,w,h,d,m){const o=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),m);o.position.set(x,y,z);o.castShadow=true;o.receiveShadow=true;parent.add(o);return o}
+function ball(parent,x,y,z,r,m,s=[1,1,1]){const o=new THREE.Mesh(new THREE.SphereGeometry(r,20,14),m);o.position.set(x,y,z);o.scale.set(...s);o.castShadow=true;parent.add(o);return o}
+const room=new THREE.Group();room.scale.set(ROOM_GROWTH,1,ROOM_GROWTH);scene.add(room);const oldPx=x=>(x-576)/60;
+box(room,0,-.2,1,17.5,.4,14.4,timber);
+// A cutaway front keeps the room playable from the angled camera.
+box(room,0,2,-6.4,17.5,4,.3,darkwood);box(room,-8.65,1.1,1,.25,2.2,14.5,darkwood);box(room,8.65,1.1,1,.25,2.2,14.5,darkwood);
+for(let x=-8;x<=8;x+=2){box(room,x,2,-6.16,.13,4,.13,brass);box(room,x,.55,-6.1,1.75,.85,.1,mat('#293638'))}
+box(room,0,.13,-6.13,17.2,.16,.2,brass);box(room,0,3.9,-6.15,17.3,.16,.22,brass);
+const windowMat=mat('#7b9abd',{emissive:'#527dae',emissiveIntensity:.65});box(room,0,2.6,-6.17,2.4,2.1,.08,black);box(room,0,2.6,-6.08,2.1,1.9,.05,windowMat);box(room,0,2.6,-5.99,.09,1.9,.1,brass);box(room,0,2.6,-5.98,2.1,.09,.1,brass);
+const rug=mat('#283e3b');box(room,-.05,.025,.38,6.15,.025,6.25,rug);for(const x of [-3,3])box(room,x,.044,.38,.06,.014,6.1,brass);for(const z of [-2.61,3.37])box(room,0,.044,z,6,.014,.06,brass);
+const furniture=[{x:80,y:140,w:110,h:72},{x:526,y:138,w:105,h:85},{x:527,y:459,w:105,h:82}];furniture.forEach((r,i)=>{const x=oldPx((r.x+r.w/2)*1.6),z=oldPx((r.y+r.h/2)*1.6),w=r.w*1.6/scale,d=r.h*1.6/scale;box(room,x,.65,z,w,1.3,d,darkwood);box(room,x,1.36,z,w+.12,.16,d+.12,timber);for(let j=0;j<2;j++){box(room,x,.4+j*.57,z+d/2+.015,w-.18,.44,.07,timber);ball(room,x,.4+j*.57,z+d/2+.08,.055,brass)}if(i===0)for(let j=0;j<5;j++)box(room,x-.8+j*.32,1.7,z,.21,.57,.65,mat(['#576d65','#7a4947','#927745'][j%3]));});
+box(room,oldPx(136*1.6),.03,oldPx(548*1.6),2.55,.06,2.1,darkwood);for(let i=0;i<5;i++)box(room,oldPx(136*1.6),.07,oldPx(515*1.6)+i*.43,2.4,.035,.035,brass);
+scene.add(new THREE.HemisphereLight('#8babc5','#25202b',.75));const moon=new THREE.DirectionalLight('#9bbaf3',1.45);moon.position.set(-3,10,-5);moon.castShadow=true;moon.shadow.mapSize.set(1024,1024);Object.assign(moon.shadow.camera,{left:-17,right:17,top:17,bottom:-17});moon.shadow.bias=-.001;scene.add(moon);
+// A real collision table with a glowing battery marker and four legs.
+const table=new THREE.Group();table.position.set(px(healthTable.x+healthTable.w/2),0,px(healthTable.y+healthTable.h/2));scene.add(table);
+const tw=healthTable.w/60,td=healthTable.h/60;box(table,0,.94,0,tw,.16,td,timber);for(const x of [-tw/2+.13,tw/2-.13])for(const z of [-td/2+.13,td/2-.13])box(table,x,.43,z,.14,.86,.14,darkwood);
+const batteryGreen=mat('#86ffb2',{emissive:'#35ff7c',emissiveIntensity:1.2});const marker=new THREE.Group();table.add(marker);box(marker,0,1.04,0,.42,.02,.12,batteryGreen);box(marker,0,1.04,0,.12,.02,.42,batteryGreen);
+const pickup=new THREE.Group();scene.add(pickup);box(pickup,0,0,0,.32,.52,.27,metal);box(pickup,0,.3,0,.16,.07,.15,brass);box(pickup,0,0,.143,.23,.35,.025,batteryGreen);box(pickup,0,0,.166,.15,.045,.025,black);box(pickup,0,0,.17,.045,.15,.025,black);pickup.add(new THREE.PointLight('#66ffaa',3,2.5));pickup.visible=false;
+// Roller-ball robot: the ball rotates independently beneath the swiveling body.
+const robot=new THREE.Group();scene.add(robot);const roller=ball(robot,0,.31,0,.32,metal);for(const axis of [0,1]){const ring=new THREE.Mesh(new THREE.TorusGeometry(.322,.022,8,32),black);if(axis)ring.rotation.y=Math.PI/2;roller.add(ring)}
+const body=new THREE.Group();robot.add(body);box(body,0,.78,0,.68,.59,.47,metal);ball(body,0,1.28,0,.45,metal,[1,.76,.76]);box(body,0,1.29,.303,.64,.27,.07,black);const eye=mat('#a8ffe2',{emissive:'#78edcc',emissiveIntensity:2});for(const x of [-.16,.16])box(body,x,1.29,.35,.095,.125,.025,eye);box(body,0,.85,-.36,.47,.6,.25,brass);for(const x of [-.43,.43])ball(body,x,.82,0,.14,metal,[.8,1.4,1]);box(body,0,1.67,0,.035,.2,.035,brass);ball(body,0,1.79,0,.065,eye);
+const nozzle=new THREE.Mesh(new THREE.CylinderGeometry(.17,.12,.45,20),metal);nozzle.rotation.x=Math.PI/2;nozzle.position.set(.32,.85,.4);body.add(nozzle);const opening=new THREE.Mesh(new THREE.CircleGeometry(.14,20),black);opening.position.set(.32,.85,.63);body.add(opening);
+const lamp=ball(body,0,1.53,.22,.11,mat('#fff0ba',{emissive:'#ffe4a1',emissiveIntensity:2}));const beam=new THREE.SpotLight('#fff0c0',65,6.4,.53,.65,1.2);beam.position.set(0,1.5,.35);body.add(beam);body.add(beam.target);beam.target.position.set(0,.65,6);const halo=new THREE.PointLight('#b2d6e0',3.5,3.2,2);halo.position.set(0,1,0);robot.add(halo);
+const ghosts=[];const ghostColors=['#a6f5cd','#bdb1ff','#ffcf92'];ghostColors.forEach(color=>{const root=new THREE.Group();scene.add(root);const glow=mat(color,{transparent:true,opacity:.86,emissive:color,emissiveIntensity:.65,roughness:.2});ball(root,0,0,0,.47,glow,[1,1.22,.75]);for(let i=0;i<5;i++){const tail=new THREE.Mesh(new THREE.ConeGeometry(.15,.45+(i%2)*.18,10),glow);tail.rotation.z=Math.PI;tail.position.set((i-2)*.17,-.55,0);root.add(tail)}for(const x of [-.17,.17]){ball(root,x,.12,.32,.14,black,[1,1.25,.45]);ball(root,x,.12,.38,.045,mat('#ff6559',{emissive:'#ff3022',emissiveIntensity:3}));ball(root,x*3,-.15,0,.16,glow,[.65,1.8,.65])}ball(root,0,-.18,.34,.13,black,[.85,1.5,.3]);const light=new THREE.PointLight(color,2,2.3);root.add(light);ghosts.push(root)});
+const tetherGeometry=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(),new THREE.Vector3()]);const tether=new THREE.Line(tetherGeometry,new THREE.LineBasicMaterial({color:'#b8ffe3',transparent:true,opacity:.9}));scene.add(tether);
+const sparks=new THREE.Points(new THREE.BufferGeometry(),new THREE.PointsMaterial({color:'#c8fbe0',size:.07,transparent:true,opacity:.8}));scene.add(sparks);
+let previous=new THREE.Vector3(),first=true;
+return {render({player,ghosts:states,particles,time,flashTimer,vac,lockedGhost,scare,battery,tableUsed}){const x=px(player.x),z=px(player.y);robot.position.set(x,0,z);body.rotation.y=Math.PI/2-player.a;if(!first){roller.rotation.x+=(z-previous.z)/.32;roller.rotation.z-=(x-previous.x)/.32}previous.set(x,0,z);first=false;
+robot.visible=player.hurt<=0||Math.floor(time*18)%2===0;marker.visible=!tableUsed;pickup.visible=!!battery;if(battery){pickup.position.set(px(battery.x),.65+Math.sin(time*4)*.1,px(battery.y));pickup.rotation.y=time*1.8;}
+beam.intensity=flashTimer>0?220:65;beam.distance=flashTimer>0?7.2:6.4;lamp.material.emissiveIntensity=flashTimer>0?7:2;
+states.forEach((g,i)=>{const o=ghosts[i];o.visible=!g.caught&&g.state!=='hidden';if(!o.visible)return;o.position.set(px(g.x),1.2+Math.sin(time*3+g.seed)*.13,px(g.y));o.rotation.y=Math.atan2(x-o.position.x,z-o.position.z);o.rotation.z=g.stun>0?Math.sin(time*22)*.07:Math.sin(time*2+g.seed)*.06;const size=g.state==='lunge'?1.45:g.state==='warning'?.3:1;o.scale.setScalar(size);});
+tether.visible=!!(vac&&lockedGhost&&!lockedGhost.caught&&lockedGhost.stun>0&&Math.hypot(lockedGhost.x-player.x,lockedGhost.y-player.y)<250);if(tether.visible){const a=new THREE.Vector3(.32,.85,.64);body.localToWorld(a);tether.geometry.setFromPoints([a,new THREE.Vector3(px(lockedGhost.x),1.15,px(lockedGhost.y))]);}
+const data=[];particles.forEach(p=>{if(p.life>0)data.push(px(p.x),.8+p.life*.5,px(p.y))});sparks.geometry.setAttribute('position',new THREE.Float32BufferAttribute(data,3));
+const focusX=THREE.MathUtils.clamp(x,-4.5*ROOM_GROWTH,4.5*ROOM_GROWTH),focusZ=THREE.MathUtils.clamp(z,-2*ROOM_GROWTH,4*ROOM_GROWTH);camera.position.set(focusX,12.5,focusZ+12.7);camera.lookAt(focusX,0,focusZ-.8);if(scare>0)camera.position.x+=Math.sin(time*65)*scare*.14;renderer.render(scene,camera);
+}};
+}
