@@ -56,10 +56,14 @@ const g=target();const linked=!!(g&&vac&&g.stun>0&&inBeam(g,340,.5));
 if(linked){g.noSuction=0;g.stun=Math.max(g.stun,.4);const dx=g.x-player.x,dy=g.y-player.y,d=Math.hypot(dx,dy)||1;g.hp-=dt*29;
 g.struggleCd-=dt;
 if(g.struggleCd<=0){
-// It fights the suction and yanks away before getting reeled back in - the "thrilling battle" beat.
-const lurchAngle=Math.atan2(dy,dx)+(Math.random()-.5)*1.1;ghostMove(g,Math.cos(lurchAngle)*30,Math.sin(lurchAngle)*30);g.struggleCd=.6+Math.random()*.5;burst(g.x,g.y,g.color,10);tone(200,.12);scare=Math.max(scare,.12);
-}else ghostMove(g,-dx/d*dt*42,-dy/d*dt*42);
-if(Math.random()<.5)particles.push({x:g.x,y:g.y,vx:-dx*2.4,vy:-dy*2.4,life:.4,color:g.color});
+// It fights the suction hard enough to actually drag the robot along with it, then gets reeled back in harder - the "thrilling battle" beat.
+const lurchAngle=Math.atan2(dy,dx)+(Math.random()-.5)*1.1;
+ghostMove(g,Math.cos(lurchAngle)*42,Math.sin(lurchAngle)*42);
+move(Math.cos(lurchAngle)*24,Math.sin(lurchAngle)*24);
+g.struggleCd=.45+Math.random()*.4;burst(g.x,g.y,g.color,14);tone(190,.14);scare=Math.max(scare,.2);
+}else ghostMove(g,-dx/d*dt*62,-dy/d*dt*62);
+particles.push({x:g.x,y:g.y,vx:-dx*3.2,vy:-dy*3.2,life:.35,color:g.color});
+if(Math.random()<.6)particles.push({x:g.x+(Math.random()-.5)*20,y:g.y+(Math.random()-.5)*20,vx:-dx*2.6,vy:-dy*2.6,life:.3,color:g.color});
 if(g.hp<=0){g.caught=true;if(lockedGhost===g)lockedGhost=null;caught++;burst(g.x,g.y,g.color,40);tone(880,.3);say('Ghost bottled!',2);ui();if(caught===3){note={x:g.x,y:g.y};burst(g.x,g.y,'#f5e4b8',24);tone(700,.4);finish(true);return}}}
 for(const h of ghosts){if(h.caught)continue;
 if(h.locked&&!(linked&&h===g)){h.noSuction+=dt;if(h.noSuction>2){const wasLocked=lockedGhost===h;respawn(h);if(wasLocked)say('It escaped! Keep suction going to stop it relocating.',2);continue}h.stun=Math.max(0,h.stun-dt);if(h.stun<=0)h.locked=false}

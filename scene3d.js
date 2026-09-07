@@ -55,11 +55,18 @@ o.rotation.z=g.stun>0?Math.sin(time*22)*.07:hunting?Math.sin(time*(3+revealed*2)
 ghostGlow[i].opacity=.035+.825*revealed;ghostGlow[i].emissiveIntensity=.02+.63*revealed;ghostEyeMat[i].opacity=Math.max(0,revealed*1.5-.5);ghostLight[i].intensity=.04+1.96*revealed;
 const eyePulse=hunting?1+Math.sin(time*9+g.seed*1.7)*.35:1;let eyeIntensity=3*eyePulse,size=hunting?1.08:1;
 if(g.state==='lunge'){const t=(g.rush??0)/.6,spike=Math.max(0,t-.7)/.3;size=1.5+spike*.4;eyeIntensity=3*(1+spike*2.2)}
-ghostEyeMat[i].emissiveIntensity=eyeIntensity;o.scale.setScalar(size);
-ghostTails[i].forEach((tail,ti)=>{const ph=g.seed+ti*1.3,tSpeed=hunting?7+revealed*3:2.5,tAmp=hunting?.16+revealed*.14:.06;tail.rotation.x=Math.sin(time*tSpeed+ph)*tAmp;tail.rotation.y=Math.cos(time*tSpeed*.8+ph)*tAmp*.8;});
+const beingSucked=vac&&lockedGhost===g&&!g.caught&&g.stun>0&&Math.hypot(g.x-player.x,g.y-player.y)<340;
+if(beingSucked){
+// Spaghettify toward the nozzle and flail in a panic - the "small thrilling battle" read.
+const strain=1-g.hp/100,stretch=1.3+Math.sin(time*13+g.seed)*.25+strain*.3;
+o.scale.set(size*.8,size*.8,size*stretch);
+eyeIntensity=3*(1.5+Math.sin(time*20+g.seed)*.7);
+}else o.scale.setScalar(size);
+ghostEyeMat[i].emissiveIntensity=eyeIntensity;
+ghostTails[i].forEach((tail,ti)=>{const ph=g.seed+ti*1.3,tSpeed=beingSucked?18:hunting?7+revealed*3:2.5,tAmp=beingSucked?.34:hunting?.16+revealed*.14:.06;tail.rotation.x=Math.sin(time*tSpeed+ph)*tAmp;tail.rotation.y=Math.cos(time*tSpeed*.8+ph)*tAmp*.8;});
 });
 iceBoltMesh.visible=!!iceBolt;if(iceBolt){iceBoltMesh.position.set(px(iceBolt.x),1.1,px(iceBolt.y));iceBoltMesh.rotation.y=time*6;iceBoltMesh.rotation.x=time*4;}
-tether.visible=!!(vac&&lockedGhost&&!lockedGhost.caught&&lockedGhost.stun>0&&Math.hypot(lockedGhost.x-player.x,lockedGhost.y-player.y)<340);if(tether.visible){const a=new THREE.Vector3(.32,.85,.64);body.localToWorld(a);tether.geometry.setFromPoints([a,new THREE.Vector3(px(lockedGhost.x),1.15,px(lockedGhost.y))]);}
+tether.visible=!!(vac&&lockedGhost&&!lockedGhost.caught&&lockedGhost.stun>0&&Math.hypot(lockedGhost.x-player.x,lockedGhost.y-player.y)<340);if(tether.visible){const a=new THREE.Vector3(.32,.85,.64);body.localToWorld(a);tether.geometry.setFromPoints([a,new THREE.Vector3(px(lockedGhost.x),1.15,px(lockedGhost.y))]);tether.material.opacity=.7+Math.sin(time*26)*.3;halo.intensity=6+Math.sin(time*22)*2.5;}else halo.intensity=3.5;
 drawParticles(sparkSys,particles.filter(p=>p.kind!=='dust'),p=>.8+p.life*.5);
 drawParticles(dustSys,particles.filter(p=>p.kind==='dust'),p=>.05+p.life*.2);
 noteProp.visible=!!note;if(note){noteProp.position.set(px(note.x),.05+Math.sin(time*2)*.015,px(note.y));noteProp.rotation.y=Math.sin(time*.7)*.2;}
