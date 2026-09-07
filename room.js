@@ -1,5 +1,8 @@
-// Double the previous room's floor area, keeping character and movement scale unchanged.
-export const ROOM_GROWTH=Math.SQRT2;
+// Double the previous room's floor area, keeping character and movement scale unchanged,
+// plus a further modest bump for a slightly larger room on top of that. ROOM_GROWTH also
+// scales the 3D room geometry in scene3d.js, so it (not just ROOM_SCALE) must carry the bump
+// or the visual room and the gameplay bounds drift apart.
+export const ROOM_GROWTH=Math.SQRT2*1.15;
 export const ROOM_SCALE=1.6*ROOM_GROWTH;
 export const WORLD=720*ROOM_SCALE;
 export const furniture=[{x:80,y:140,w:110,h:72},{x:526,y:138,w:105,h:85},{x:527,y:459,w:105,h:82}].map(r=>({x:r.x*ROOM_SCALE,y:r.y*ROOM_SCALE,w:r.w*ROOM_SCALE,h:r.h*ROOM_SCALE}));
