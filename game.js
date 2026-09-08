@@ -2,7 +2,7 @@ import {createHaunt} from './scene3d.js';
 import {ROOM_SCALE,WORLD,healthTable,bounds,blocked} from './room.js';
 const canvas=document.querySelector('#game'),$=s=>document.querySelector(s);
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v)),colors=['#a6f5cd','#ff6a5a','#ffcf92'],types=['flee','melee','ice'];
-let player,ghosts,particles,time=0,last=0,lightOn=false,vac=false,keys={},joy={x:0,y:0},caught=0,active=true,sound=false,ac,noticeTime=0,lockedGhost=null,scare=0,battery=null,tableUsed=false,iceBolt=null,dustCd=0,note=null;
+let player,ghosts,particles,time=0,last=0,lightOn=false,lightCharge=100,vac=false,keys={},joy={x:0,y:0},caught=0,active=true,sound=false,ac,noticeTime=0,lockedGhost=null,scare=0,battery=null,tableUsed=false,iceBolt=null,dustCd=0,note=null;
 function say(t,d=2.5){noticeTime=d;$('#message').textContent=t}
 function tone(f,d=.1){if(!sound)return;try{ac??=new(window.AudioContext||window.webkitAudioContext)();ac.resume();const o=ac.createOscillator(),g=ac.createGain();o.type='sine';o.frequency.setValueAtTime(f,ac.currentTime);o.frequency.exponentialRampToValueAtTime(f*1.3,ac.currentTime+d);g.gain.setValueAtTime(.055,ac.currentTime);g.gain.exponentialRampToValueAtTime(.001,ac.currentTime+d);o.connect(g).connect(ac.destination);o.start();o.stop(ac.currentTime+d)}catch{}}
 function burst(x,y,color,n){for(let i=0;i<n;i++)particles.push({x,y,vx:(Math.random()-.5)*200,vy:(Math.random()-.5)*200,life:.5+Math.random()*.5,color})}
@@ -10,17 +10,18 @@ function ui(){
 $('#count').textContent='●'.repeat(caught)+'○'.repeat(3-caught)+'   '+caught+' / 3 captured';
 $('#health-text').textContent=player.hp+' / 100 HP';$('#health-fill').style.width=player.hp+'%';$('#health').setAttribute('aria-valuenow',player.hp);$('#health').classList.toggle('low',player.hp<=25);
 $('#battery-status').textContent=tableUsed?(battery?'Battery ready · +50 HP':'Battery used'):'Bump the green-marked table · +50 HP';
+const chargePct=Math.round(lightCharge);$('#light-text').textContent=chargePct+'%';$('#light-fill').style.width=chargePct+'%';$('#light').setAttribute('aria-valuenow',chargePct);$('#light').classList.toggle('low',lightCharge<=20);
 }
 function finish(won){active=false;lockedGhost=null;release();$('#win small').textContent=won?'ROOM CLEAR':'POWER DEPLETED';$('#win h2').textContent=won?'A tidy little haunting.':'Robot offline.';$('#win p').textContent=won?'Three ghosts safely bottled. '+player.hp+' HP remaining. A note flutters down: “Congrats — the next room holds the key to the manor.”':'The ghosts got you. Restart with 100 HP and a fresh battery.';$('#again').textContent=won?'Play again':'Try again';$('#win').hidden=false}
 function reset(){
-lockedGhost=null;player={x:340*ROOM_SCALE,y:526*ROOM_SCALE,a:-Math.PI/2,hp:100,hurt:0,slow:0};particles=[];scare=0;time=0;caught=0;active=true;vac=false;keys={};joy={x:0,y:0};lightOn=false;battery=null;tableUsed=false;iceBolt=null;dustCd=0;note=null;
+lockedGhost=null;player={x:340*ROOM_SCALE,y:526*ROOM_SCALE,a:-Math.PI/2,hp:100,hurt:0,slow:0};particles=[];scare=0;time=0;caught=0;active=true;vac=false;keys={};joy={x:0,y:0};lightOn=false;lightCharge=100;battery=null;tableUsed=false;iceBolt=null;dustCd=0;note=null;
 ghosts=colors.map((color,i)=>({x:[210,505,500][i]*ROOM_SCALE,y:[215,228,465][i]*ROOM_SCALE,state:'warning',color,type:types[i],hp:100,stun:0,caught:false,seed:i*2.3,noSuction:0,touching:false,attackTime:0,locked:false,reveal:0,fireCd:1.2,struggleCd:.9}));
-$('#win').hidden=true;$('#knob').style.transform='';$('#vacuum').classList.remove('active');$('#fill').style.width='0%';$('#label').textContent='LIGHT ON TO SPOT · VACUUM TO CAPTURE';$('#flash').innerHTML='<b>✦</b> LIGHT OFF';$('#flash').classList.remove('active');say('It’s dark in here. Click LIGHT to see — it wakes and stuns ghosts it touches.',5);ui();
+$('#win').hidden=true;$('#knob').style.transform='';$('#vacuum').classList.remove('active');$('#fill').style.width='0%';$('#label').textContent='LIGHT ON TO SPOT · VACUUM TO CAPTURE';$('#flash').innerHTML='<b>✦</b> LIGHT OFF';$('#flash').classList.remove('active');say('It’s dark in here. Click LIGHT to see — but its battery drains, so use it wisely.',5);ui();
 }
 function inBeam(g,range=250,angle=.48){const dx=g.x-player.x,dy=g.y-player.y;return Math.hypot(dx,dy)<range&&Math.cos(Math.atan2(dy,dx)-player.a)>Math.cos(angle)}
 function lockValid(){return lockedGhost&&!lockedGhost.caught&&lockedGhost.stun>0&&!['warning','hidden'].includes(lockedGhost.state)&&Math.hypot(lockedGhost.x-player.x,lockedGhost.y-player.y)<380}
 function target(){if(lockValid())return lockedGhost;if(!lightOn)return undefined;return ghosts.filter(g=>!g.caught&&g.state!=='warning'&&inBeam(g)).sort((a,b)=>Math.hypot(a.x-player.x,a.y-player.y)-Math.hypot(b.x-player.x,b.y-player.y))[0]}
-function toggleLight(){if(!active)return;lightOn=!lightOn;tone(lightOn?620:280,.15);$('#flash').innerHTML='<b>✦</b> '+(lightOn?'LIGHT ON':'LIGHT OFF');$('#flash').classList.toggle('active',lightOn);say(lightOn?'Light on — anything it touches wakes up or gets stunned.':'Light off. Dark and quiet... for now.',1.8)}
+function toggleLight(){if(!active)return;if(!lightOn&&lightCharge<=4){say('Battery too low — let it recharge in the dark.',1.6);tone(160,.2);return}lightOn=!lightOn;tone(lightOn?620:280,.15);$('#flash').innerHTML='<b>✦</b> '+(lightOn?'LIGHT ON':'LIGHT OFF');$('#flash').classList.toggle('active',lightOn);say(lightOn?'Light on — anything it touches wakes up or gets stunned.':'Light off. Dark and quiet... for now.',1.8)}
 function spawnBattery(){
 if(tableUsed)return;tableUsed=true;
 // Eject on the side the robot touched, into reachable floor space.
@@ -67,6 +68,9 @@ if((h.slashTime||0)>0){
 }
 function update(dt){time+=dt;scare=Math.max(0,scare-dt);noticeTime-=dt;player.hurt=Math.max(0,player.hurt-dt);player.slow=Math.max(0,player.slow-dt);if(!active)return;
 const slowMul=player.slow>0?.55:1;
+if(lightOn){lightCharge=Math.max(0,lightCharge-dt*7);if(lightCharge<=0){lightOn=false;$('#flash').innerHTML='<b>✦</b> LIGHT OFF';$('#flash').classList.remove('active');say('Battery drained! It only recharges while the light is off.',2.2);tone(150,.3)}}
+else lightCharge=Math.min(100,lightCharge+dt*4);
+$('#light-fill').style.width=lightCharge+'%';$('#light-text').textContent=Math.round(lightCharge)+'%';$('#light').setAttribute('aria-valuenow',Math.round(lightCharge));$('#light').classList.toggle('low',lightCharge<=20);
 let mx=joy.x+(keys.d||keys.ArrowRight?1:0)-(keys.a||keys.ArrowLeft?1:0),my=joy.y+(keys.s||keys.ArrowDown?1:0)-(keys.w||keys.ArrowUp?1:0);const mag=Math.hypot(mx,my);if(mag>1){mx/=mag;my/=mag}
 if(!lockValid())lockedGhost=null;
 // Acquire before joystick movement can rotate the flashlight away.
@@ -110,7 +114,15 @@ if(g.hp<=0){g.caught=true;if(lockedGhost===g)lockedGhost=null;caught++;burst(g.x
 for(const h of ghosts){if(h.caught)continue;
 if(!(linked&&h===g)){h.captureAge=0;h.pullVX=0;h.pullVY=0;h.captureVX=0;h.captureVY=0;h.tension=0;h.pullingBack=0}
 if(h.locked&&!(linked&&h===g)){h.noSuction+=dt;if(h.noSuction>2){const wasLocked=lockedGhost===h;respawn(h);if(wasLocked)say('It escaped! Keep suction going to stop it relocating.',2);continue}h.stun=Math.max(0,h.stun-dt);if(h.stun<=0)h.locked=false}
-if(h.state==='warning'){if(lightOn&&inBeam(h)){h.state='roam';h.attackTime=0;burst(h.x,h.y,h.color,10);tone(140,.2);say('It saw your light — now it’s hunting you!',2)}continue}
+if(h.state==='warning'){
+if(lightOn&&inBeam(h)){h.state='roam';h.attackTime=0;burst(h.x,h.y,h.color,10);tone(140,.2);say('It saw your light — now it’s hunting you!',2)}
+else{
+// Hidden ghosts stay harmless (state stays 'warning'), but sense the player up close and creep in - unsettling, not dangerous.
+const pdx=player.x-h.x,pdy=player.y-h.y,pd=Math.hypot(pdx,pdy)||1;
+if(pd<220){const creep=14+40*(1-pd/220);ghostMove(h,pdx/pd*dt*creep,pdy/pd*dt*creep)}
+}
+continue;
+}
 const lit=lightOn&&inBeam(h,240,.52);
 if(lit){if(h.stun<=0){burst(h.x,h.y,h.color,6);tone(500,.08)}if(!lockValid())lockedGhost=h;if(h.state==='lunge')h.state='roam';h.stun=Math.max(h.stun,1);h.locked=true;h.noSuction=0}
 h.reveal=Math.min(1,h.reveal+dt/.4);
@@ -131,10 +143,10 @@ contact(h);if(!active)return;
 }
 if(lockValid())player.a=Math.atan2(lockedGhost.y-player.y,lockedGhost.x-player.x);
 const current=target();$('#fill').style.width=current?(100-current.hp)+'%':'0%';$('#label').textContent=linked&&g&&!g.caught?'LOCKED ON · '+Math.floor(100-g.hp)+'% · PULL BACK':current?.stun>0?'LOCKED · VACUUM NOW · '+Math.max(0,2-current.noSuction).toFixed(1)+'s':'LIGHT ON TO SPOT · VACUUM TO CAPTURE';
-if(noticeTime<=0)$('#message').textContent=linked?(g.hp<30?'Almost in! Keep pulling!':g.pullingBack>.45?'Good brace! You’re reeling it in.':'It’s dragging you! Pull away with the joystick.') :current?.stun>0?'Hold VACUUM — ghosts relocate after 2 seconds without suction.':lightOn?'Sweep the light around — it stuns whatever it touches.':'Turn the light on to see. It wakes hidden ghosts and stuns awake ones.';
+if(noticeTime<=0)$('#message').textContent=linked?(g.hp<30?'Almost in! Keep pulling!':g.pullingBack>.45?'Good brace! You’re reeling it in.':'It’s dragging you! Pull away with the joystick.') :current?.stun>0?'Hold VACUUM — ghosts relocate after 2 seconds without suction.':lightOn?(lightCharge<20?'Battery low! It’ll cut out soon — find a target fast.':'Sweep the light around — it stuns whatever it touches.'):'Turn the light on to see. It wakes hidden ghosts and stuns awake ones.';
 }
 let world3d;try{world3d=createHaunt(canvas)}catch(error){$('#message').textContent='3D needs WebGL. Try opening this page in Safari or Chrome.';throw error}
-function render(dt){particles=particles.filter(p=>p.life>0);particles.forEach(p=>{p.life-=dt;p.x+=p.vx*dt;p.y+=p.vy*dt});world3d.render({player,ghosts,particles,time,lightOn,vac,lockedGhost,scare,battery,tableUsed,iceBolt,note})}
+function render(dt){particles=particles.filter(p=>p.life>0);particles.forEach(p=>{p.life-=dt;p.x+=p.vx*dt;p.y+=p.vy*dt});world3d.render({player,ghosts,particles,time,lightOn,lightCharge,vac,lockedGhost,scare,battery,tableUsed,iceBolt,note})}
 function frame(t){const dt=Math.min((t-last)/1000||0,.04);last=t;update(dt);render(dt);requestAnimationFrame(frame)}
 let pointer=null;const stick=$('#stick');function stickMove(e){const r=stick.getBoundingClientRect(),x=e.clientX-r.left-r.width/2,y=e.clientY-r.top-r.height/2,d=Math.hypot(x,y),scale=d>38?38/d:1;joy={x:x*scale/38,y:y*scale/38};$('#knob').style.transform=`translate(${x*scale}px,${y*scale}px)`}stick.addEventListener('pointerdown',e=>{e.preventDefault();pointer=e.pointerId;stick.setPointerCapture(pointer);stickMove(e)});stick.addEventListener('pointermove',e=>{if(e.pointerId===pointer)stickMove(e)});function endStick(){pointer=null;joy={x:0,y:0};$('#knob').style.transform=''}stick.addEventListener('pointerup',endStick);stick.addEventListener('pointercancel',endStick);stick.addEventListener('lostpointercapture',endStick);
 $('#flash').addEventListener('pointerdown',e=>{e.preventDefault();toggleLight()});$('#flash').addEventListener('click',e=>{if(e.detail===0)toggleLight()});$('#vacuum').addEventListener('pointerdown',e=>{e.preventDefault();e.currentTarget.setPointerCapture(e.pointerId);vac=true;e.currentTarget.classList.add('active')});function endVac(){vac=false;$('#vacuum').classList.remove('active')}['pointerup','pointercancel','lostpointercapture'].forEach(s=>$('#vacuum').addEventListener(s,endVac));window.addEventListener('keydown',e=>{const k=e.key.length===1?e.key.toLowerCase():e.key;if([' ','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','w','a','s','d','v'].includes(k))e.preventDefault();keys[k]=true;if(k===' '&&!e.repeat)toggleLight();if(k==='v')vac=true});window.addEventListener('keyup',e=>{const k=e.key.length===1?e.key.toLowerCase():e.key;keys[k]=false;if(k==='v')endVac()});function release(){keys={};endVac();endStick()}window.addEventListener('blur',release);document.addEventListener('visibilitychange',()=>{if(document.hidden)release()});$('#reset').onclick=reset;$('#again').onclick=reset;$('#sound').onclick=()=>{sound=!sound;$('#sound').textContent=sound?'Sound on':'Sound off';tone(440)};reset();requestAnimationFrame(frame);

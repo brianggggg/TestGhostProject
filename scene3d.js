@@ -41,9 +41,10 @@ function drawParticles(sys,list,heightFn){let n=0;for(let k=0;k<list.length&&n<s
 // A small dropped note - appears once the final ghost is captured.
 const noteMat=mat('#e9dcb8',{roughness:.9});const noteProp=new THREE.Group();scene.add(noteProp);box(noteProp,0,0,0,.34,.02,.44,noteMat);box(noteProp,0,.011,0,.22,.002,.02,mat('#8a7350'));box(noteProp,0,.011,-.08,.16,.002,.015,mat('#8a7350'));noteProp.add(new THREE.PointLight('#fff3cf',1.4,1.6));noteProp.visible=false;
 let previous=new THREE.Vector3(),first=true;
-return {render({player,ghosts:states,particles,time,lightOn,vac,lockedGhost,scare,battery,tableUsed,iceBolt,note}){const x=px(player.x),z=px(player.y);robot.position.set(x,0,z);body.rotation.y=Math.PI/2-player.a;if(!first){roller.rotation.x+=(z-previous.z)/.32;roller.rotation.z-=(x-previous.x)/.32}previous.set(x,0,z);first=false;
+return {render({player,ghosts:states,particles,time,lightOn,lightCharge,vac,lockedGhost,scare,battery,tableUsed,iceBolt,note}){const x=px(player.x),z=px(player.y);robot.position.set(x,0,z);body.rotation.y=Math.PI/2-player.a;if(!first){roller.rotation.x+=(z-previous.z)/.32;roller.rotation.z-=(x-previous.x)/.32}previous.set(x,0,z);first=false;
 robot.visible=player.hurt<=0||Math.floor(time*18)%2===0;marker.visible=!tableUsed;pickup.visible=!!battery;if(battery){pickup.position.set(px(battery.x),.65+Math.sin(time*4)*.1,px(battery.y));pickup.rotation.y=time*1.8;}
-beam.intensity=lightOn?150:0;beam.distance=lightOn?7.6:6.4;lamp.material.emissiveIntensity=lightOn?6:.8;
+const lowBattery=lightOn&&lightCharge<20;const flicker=lowBattery?.75+Math.random()*.35:1;
+beam.intensity=lightOn?150*flicker:0;beam.distance=lightOn?7.6:6.4;lamp.material.emissiveIntensity=lightOn?6*flicker:.8;
 metal.emissive.set(player.slow>0?'#3aa0ff':'#000000');
 states.forEach((g,i)=>{const o=ghosts[i];o.visible=!g.caught&&g.state!=='hidden';if(!o.visible)return;
 const revealed=g.state==='warning'?0:(g.reveal??1);const hunting=g.state!=='warning';
