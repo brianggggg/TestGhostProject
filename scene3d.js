@@ -82,6 +82,20 @@ function buildGraveRoom(rect,westRange,eastRange){
 }
 const graveChain=[...graveyardRooms,bossRoom];
 graveChain.forEach((r,i)=>buildGraveRoom(r,graveyardDoors[i]?graveyardDoors[i].range:null,graveyardDoors[i+1]?graveyardDoors[i+1].range:null));
+// A real door at every graveyard threshold (yard->grave1 through grave4->grave5) instead of
+// an empty gap - closed, it fills the doorway flush; game.js's doorOpen[] (proximity-driven)
+// swings it open with a bang as the robot approaches, and shut again once it moves off. The
+// boss doorway is excluded - that one stays behind the permanent barred gate above/below.
+const doorPanelMat=mat('#2c2118',{roughness:.85}),doorBandMat=mat('#4a4136',{metalness:.4,roughness:.6});
+const graveDoors=graveyardDoors.map(d=>{
+  if(d.isBoss)return null;
+  const dz0=px(d.range[0]),dz1=px(d.range[1]),dx=px(d.x),len=dz1-dz0;
+  const hinge=new THREE.Group();hinge.position.set(dx,1.5,dz0);hinge.userData.angle=0;scene.add(hinge);
+  box(hinge,0,0,len/2,.22,3,len,doorPanelMat);
+  box(hinge,.13,.4,len/2,.05,.1,len-.14,doorBandMat);box(hinge,.13,-.4,len/2,.05,.1,len-.14,doorBandMat);
+  ball(hinge,.15,0,len-.22,.06,doorBandMat);
+  return hinge;
+});
 // Gravestones scattered through the graveyard rooms - simple obstacle props, same pattern
 // as the mansion furniture below.
 const graveStoneMat=mat('#8a93a0',{roughness:.85});
@@ -120,8 +134,10 @@ function drawParticles(sys,list,heightFn){let n=0;for(let k=0;k<list.length&&n<s
 // A small dropped note - appears once the final ghost is captured.
 const noteMat=mat('#e9dcb8',{roughness:.9});const noteProp=new THREE.Group();scene.add(noteProp);box(noteProp,0,0,0,.34,.02,.44,noteMat);box(noteProp,0,.011,0,.22,.002,.02,mat('#8a7350'));box(noteProp,0,.011,-.08,.16,.002,.015,mat('#8a7350'));noteProp.add(new THREE.PointLight('#fff3cf',1.4,1.6));noteProp.visible=false;
 let previous=new THREE.Vector3(),first=true;
-return {render({player,ghosts:states,particles,time,lightOn,lightCharge,maxLightCharge=100,vac,lockedGhost,scare,battery,tableUsed,iceBolt,note,key,coinPickups=[]}){
+return {render({player,ghosts:states,particles,time,dt=0,lightOn,lightCharge,maxLightCharge=100,vac,lockedGhost,scare,battery,tableUsed,iceBolt,note,key,coinPickups=[],doorOpen=[]}){
 sealDoor.visible=!doorUnlocked;
+// Bang open fast (with a slight overshoot past perpendicular for punch), ease shut slower.
+graveDoors.forEach((hinge,i)=>{if(!hinge)return;const target=doorOpen[i]?-2.05:0;const rate=doorOpen[i]?16:5;hinge.userData.angle+=(target-hinge.userData.angle)*Math.min(1,dt*rate);hinge.rotation.y=hinge.userData.angle;});
 keyProp.visible=!!key;if(key){keyProp.position.set(px(key.x),.35+Math.sin(time*3)*.08,px(key.y));keyProp.rotation.y=time*1.6;}
 coinPickups.forEach((c,i)=>{const m=coinProps[i];if(!m)return;m.visible=!c.taken;if(!c.taken){m.position.set(px(c.x),.3+Math.sin(time*4+i)*.05,px(c.y));m.rotation.y=time*2.2;const silver=c.kind==='silver';m.material.color.copy(silver?silverColor:goldColor);m.material.emissive.copy(silver?silverEmissive:goldEmissive);}});const x=px(player.x),z=px(player.y);robot.position.set(x,0,z);body.rotation.y=Math.PI/2-player.a;if(!first){roller.rotation.x+=(z-previous.z)/.32;roller.rotation.z-=(x-previous.x)/.32}previous.set(x,0,z);first=false;
 robot.visible=player.hurt<=0||Math.floor(time*18)%2===0;marker.visible=!tableUsed;pickup.visible=!!battery;if(battery){pickup.position.set(px(battery.x),.65+Math.sin(time*4)*.1,px(battery.y));pickup.rotation.y=time*1.8;}

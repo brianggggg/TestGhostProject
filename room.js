@@ -83,7 +83,10 @@ export const DOOR_GAME=[DOOR[0]*ROOM_SCALE,DOOR[1]*ROOM_SCALE];
 // doorway's vertical placement are randomized per generation for real per-run variety. The
 // chain ends in a boss room that stays permanently sealed this phase - the space is
 // reserved, not the fight itself (that's a later phase).
-const GY_COUNT=5,GY_MIN_W=380,GY_MAX_W=560,GY_GAP=90,GY_DOOR_H=110,GY_MARGIN=30,BOSS_W=440;
+// GY_GAP is deliberately thin (a doorway threshold, not a corridor) - each connection gets
+// an actual door panel (scene3d.js) that bangs open as the player approaches, rather than
+// reading as an empty hallway stretch between rooms.
+const GY_COUNT=5,GY_MIN_W=380,GY_MAX_W=560,GY_GAP=24,GY_DOOR_H=110,GY_MARGIN=30,BOSS_W=440;
 export let graveyardRooms=[],bossRoom=null,graveyardCoinSpots=[],graveyardDoors=[],bossGate=null,graveyardObstacles=[];
 let graveyardWalls=[],bossSeal=[];
 const rand=(a,b)=>a+Math.random()*(b-a),ri=(a,b)=>Math.floor(rand(a,b+1));

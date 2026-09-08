@@ -1,11 +1,15 @@
 import {createHaunt} from './scene3d.js';
-import {ROOM_SCALE,WORLD,healthTable,bounds,blocked,shopSpot,unlockExteriorDoor,lockExteriorDoor,roomAt,generateGraveyard,graveyardCoinSpots,bossGate} from './room.js';
+import {ROOM_SCALE,WORLD,healthTable,bounds,blocked,shopSpot,unlockExteriorDoor,lockExteriorDoor,roomAt,generateGraveyard,graveyardCoinSpots,graveyardDoors,bossGate} from './room.js';
 const canvas=document.querySelector('#game'),$=s=>document.querySelector(s);
 // Generated once at load (not per-restart) so scene3d's static procedural geometry, built
 // once in createHaunt() below, always matches room.js's layout/collision.
 generateGraveyard();
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v)),colors=['#a6f5cd','#ff6a5a','#ffcf92'],types=['flee','melee','ice'];
 let player,ghosts,particles,time=0,last=0,lightOn=false,lightCharge=100,maxLightCharge=100,vac=false,keys={},joy={x:0,y:0},caught=0,active=true,sound=false,ac,noticeTime=0,lockedGhost=null,scare=0,battery=null,tableUsed=false,iceBolt=null,dustCd=0,note=null,maxHp=100,coins=0,hasKey=false,key=null,coinPickups=[],shopOpen=false,upgrades={},announcedGraveyard=false,announcedBoss=false;
+// One entry per graveyard doorway (yard->grave1 through grave5->boss, boss excluded below) -
+// whether that door is currently banged open. scene3d.js only handles the swing animation;
+// this is the actual game-state toggle, driven purely by player proximity.
+let doorOpen=graveyardDoors.map(()=>false);
 // One-time shop upgrades, bought with coins found around the mansion.
 const UPGRADES=[
 {id:'battery',label:'Battery Pack',desc:'+30 max flashlight charge',cost:20,apply:()=>{maxLightCharge+=30;lightCharge=Math.min(maxLightCharge,lightCharge+30)}},
@@ -34,7 +38,7 @@ syncLight();
 }
 function finish(){active=false;lockedGhost=null;release();$('#win small').textContent='POWER DEPLETED';$('#win h2').textContent='Robot offline.';$('#win p').textContent='The ghosts got you. Restart with '+maxHp+' HP and a fresh battery.';$('#again').textContent='Try again';$('#win').hidden=false}
 function reset(){
-maxHp=100;maxLightCharge=100;suctionMul=1;upgrades={};coins=0;hasKey=false;key=null;shopOpen=false;$('#shop').hidden=true;lockExteriorDoor();announcedGraveyard=false;announcedBoss=false;
+maxHp=100;maxLightCharge=100;suctionMul=1;upgrades={};coins=0;hasKey=false;key=null;shopOpen=false;$('#shop').hidden=true;lockExteriorDoor();announcedGraveyard=false;announcedBoss=false;doorOpen=graveyardDoors.map(()=>false);
 lockedGhost=null;player={x:810*ROOM_SCALE,y:190*ROOM_SCALE,a:-Math.PI/2,hp:maxHp,hurt:0,slow:0};particles=[];scare=0;time=0;caught=0;active=true;vac=false;keys={};joy={x:0,y:0};lightOn=false;lightCharge=maxLightCharge;battery=null;tableUsed=false;iceBolt=null;dustCd=0;note=null;
 // One ghost per mansion room (west/center/east), matching the flee/melee/ice type order.
 ghosts=colors.map((color,i)=>({x:[350,650,1450][i]*ROOM_SCALE,y:[280,280,280][i]*ROOM_SCALE,state:'warning',color,type:types[i],hp:100,stun:0,caught:false,seed:i*2.3,noSuction:0,touching:false,attackTime:0,locked:false,reveal:0,fireCd:1.2,struggleCd:.9}));
@@ -110,6 +114,14 @@ if(battery){battery.age+=dt;if(battery.age>.35&&player.hp<maxHp&&Math.hypot(play
 for(const c of coinPickups){if(!c.taken&&Math.hypot(player.x-c.x,player.y-c.y)<38){c.taken=true;coins+=c.v;burst(c.x,c.y,c.kind==='silver'?'#d8e0e6':'#ffd35c',16);tone(820,.12);say('+'+c.v+' coins',1.3);ui()}}
 if(!announcedGraveyard&&roomAt(player.x,player.y).name.startsWith('grave')){announcedGraveyard=true;say('A graveyard beyond the mansion... treasure glints among the headstones.',3.5)}
 if(!announcedBoss&&bossGate&&Math.hypot(player.x-bossGate.x,player.y-bossGate.y)<170){announcedBoss=true;say('The far gate is sealed shut. Something bigger sleeps beyond — not yet.',3.5)}
+// Graveyard doors bang open as the robot approaches and swing shut again once it moves off -
+// a startle each time, not a one-shot. The boss gate stays out of this (it never opens).
+graveyardDoors.forEach((d,i)=>{
+if(d.isBoss)return;
+const dy=(d.range[0]+d.range[1])/2,dist=Math.hypot(player.x-d.x,player.y-dy);
+if(!doorOpen[i]&&dist<150){doorOpen[i]=true;burst(d.x,dy,'#6b5a42',14);tone(82,.32);scare=Math.max(scare,.22)}
+else if(doorOpen[i]&&dist>260)doorOpen[i]=false;
+});
 if(key&&!hasKey&&Math.hypot(player.x-key.x,player.y-key.y)<42){hasKey=true;const kx=key.x,ky=key.y;key=null;unlockExteriorDoor();burst(kx,ky,'#ffe9a8',26);tone(760,.3);say('Key acquired! The exterior door has unlocked — head east to the yard.',3.5);ui()}
 updateShop(hasKey&&Math.hypot(player.x-shopSpot.x,player.y-shopSpot.y)<150);
 if(iceBolt){iceBolt.x+=iceBolt.vx*dt;iceBolt.y+=iceBolt.vy*dt;iceBolt.life-=dt;if(Math.hypot(iceBolt.x-player.x,iceBolt.y-player.y)<40){player.slow=2.2;burst(iceBolt.x,iceBolt.y,'#bdeeff',18);tone(300,.25);say('Frozen! Moving slower for a moment.',1.5);iceBolt=null}else if(iceBolt.life<=0)iceBolt=null}
@@ -178,7 +190,7 @@ const current=target();$('#fill').style.width=current?(100-current.hp)+'%':'0%';
 if(noticeTime<=0)$('#message').textContent=linked?(g.hp<30?'Almost in! Keep pulling!':g.pullingBack>.45?'Good brace! You’re reeling it in.':'It’s dragging you! Pull away with the joystick.') :current?.stun>0?'Hold VACUUM — ghosts relocate after 2 seconds without suction.':lightOn?(lightCharge<maxLightCharge*.2?'Battery low! It’ll cut out soon — find a target fast.':'Sweep the light around — it stuns whatever it touches.'):shopOpen?'Welcome! Spend your coins on upgrades.':'Turn the light on to see. It wakes hidden ghosts and stuns awake ones.';
 }
 let world3d;try{world3d=createHaunt(canvas)}catch(error){$('#message').textContent='3D needs WebGL. Try opening this page in Safari or Chrome.';throw error}
-function render(dt){particles=particles.filter(p=>p.life>0);particles.forEach(p=>{p.life-=dt;p.x+=p.vx*dt;p.y+=p.vy*dt});world3d.render({player,ghosts,particles,time,lightOn,lightCharge,maxLightCharge,vac,lockedGhost,scare,battery,tableUsed,iceBolt,note,key,coinPickups})}
+function render(dt){particles=particles.filter(p=>p.life>0);particles.forEach(p=>{p.life-=dt;p.x+=p.vx*dt;p.y+=p.vy*dt});world3d.render({player,ghosts,particles,time,dt,lightOn,lightCharge,maxLightCharge,vac,lockedGhost,scare,battery,tableUsed,iceBolt,note,key,coinPickups,doorOpen})}
 function frame(t){const dt=Math.min((t-last)/1000||0,.04);last=t;update(dt);render(dt);requestAnimationFrame(frame)}
 let pointer=null;const stick=$('#stick');function stickMove(e){const r=stick.getBoundingClientRect(),x=e.clientX-r.left-r.width/2,y=e.clientY-r.top-r.height/2,d=Math.hypot(x,y),scale=d>38?38/d:1;joy={x:x*scale/38,y:y*scale/38};$('#knob').style.transform=`translate(${x*scale}px,${y*scale}px)`}stick.addEventListener('pointerdown',e=>{e.preventDefault();pointer=e.pointerId;stick.setPointerCapture(pointer);stickMove(e)});stick.addEventListener('pointermove',e=>{if(e.pointerId===pointer)stickMove(e)});function endStick(){pointer=null;joy={x:0,y:0};$('#knob').style.transform=''}stick.addEventListener('pointerup',endStick);stick.addEventListener('pointercancel',endStick);stick.addEventListener('lostpointercapture',endStick);
 $('#flash').addEventListener('pointerdown',e=>{e.preventDefault();toggleLight()});$('#flash').addEventListener('click',e=>{if(e.detail===0)toggleLight()});$('#vacuum').addEventListener('pointerdown',e=>{e.preventDefault();e.currentTarget.setPointerCapture(e.pointerId);vac=true;e.currentTarget.classList.add('active')});function endVac(){vac=false;$('#vacuum').classList.remove('active')}['pointerup','pointercancel','lostpointercapture'].forEach(s=>$('#vacuum').addEventListener(s,endVac));window.addEventListener('keydown',e=>{const k=e.key.length===1?e.key.toLowerCase():e.key;if([' ','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','w','a','s','d','v'].includes(k))e.preventDefault();keys[k]=true;if(k===' '&&!e.repeat)toggleLight();if(k==='v')vac=true});window.addEventListener('keyup',e=>{const k=e.key.length===1?e.key.toLowerCase():e.key;keys[k]=false;if(k==='v')endVac()});function release(){keys={};endVac();endStick()}window.addEventListener('blur',release);document.addEventListener('visibilitychange',()=>{if(document.hidden)release()});$('#reset').onclick=reset;$('#again').onclick=reset;$('#sound').onclick=()=>{sound=!sound;$('#sound').textContent=sound?'Sound on':'Sound off';tone(440)};UPGRADES.forEach(u=>$('#buy-'+u.id).addEventListener('click',()=>buyUpgrade(u.id)));reset();requestAnimationFrame(frame);
