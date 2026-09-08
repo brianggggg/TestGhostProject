@@ -1,5 +1,5 @@
 import * as THREE from './three.module.js';
-import {WORLD,healthTable,rooms,roomAt,DOOR_GAME,furniture as roomFurniture,yard,shopSpot,doorUnlocked} from './room.js';
+import {WORLD,healthTable,rooms,roomAt,DOOR_GAME,furniture as roomFurniture,yard,shopSpot,doorUnlocked,graveyardRooms,bossRoom,graveyardDoors,graveyardObstacles,bossGate} from './room.js';
 export function createHaunt(canvas){
 const renderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:false});renderer.setPixelRatio(Math.min(devicePixelRatio||1,1.7));renderer.setSize(720,720,false);renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.25;
 const scene=new THREE.Scene();scene.background=new THREE.Color('#080c15');scene.fog=new THREE.FogExp2('#080c15',.026);
@@ -54,9 +54,49 @@ const keyMat=mat('#ffd35c',{metalness:.6,roughness:.3,emissive:'#c9932e',emissiv
 const keyProp=new THREE.Group();scene.add(keyProp);
 ball(keyProp,0,0,0,.12,keyMat);box(keyProp,0,0,.16,.05,.05,.24,keyMat);box(keyProp,.05,0,.3,.02,.08,.03,keyMat);box(keyProp,-.05,0,.32,.02,.06,.03,keyMat);
 keyProp.add(new THREE.PointLight('#ffd35c',2,2));keyProp.visible=false;
-// Three coin pickups, one per mansion room - small preallocated pool, same as the ghosts array.
+// Coin pickups - 3 fixed mansion spots plus the procedural graveyard's larger treasure
+// haul. Preallocate generously since the graveyard's count varies per generation; each
+// mesh gets its own material clone so gold vs silver can be recolored independently.
 const coinMat=mat('#ffd35c',{metalness:.5,roughness:.3,emissive:'#e0a92e',emissiveIntensity:.6});
-const coinProps=[0,1,2].map(()=>{const c=new THREE.Mesh(new THREE.CylinderGeometry(.13,.13,.035,18),coinMat);c.rotation.x=Math.PI/2;c.visible=false;c.castShadow=true;scene.add(c);return c});
+const coinGeo=new THREE.CylinderGeometry(.13,.13,.035,18);
+const coinProps=Array.from({length:32},()=>{const c=new THREE.Mesh(coinGeo,coinMat.clone());c.rotation.x=Math.PI/2;c.visible=false;c.castShadow=true;scene.add(c);return c});
+const goldColor=new THREE.Color('#ffd35c'),goldEmissive=new THREE.Color('#e0a92e'),silverColor=new THREE.Color('#d8e0e6'),silverEmissive=new THREE.Color('#9aa6ad');
+// ---- The procedural graveyard, past the yard, and its reserved boss room ----
+// Same construction approach as buildRoom() (built via px(), open/solid sides mirroring
+// room.js's collision gaps) but themed for the outdoors: bare ground, low stone/hedge
+// walls, no window. Unlike the mansion's shared fixed DOOR_GAME, each graveyard doorway
+// has its own randomized opening range, passed in directly rather than assumed.
+const stoneMat=mat('#6b7580',{roughness:.9}),dirtMat=mat('#3a3226',{roughness:1}),hedgeMat=mat('#243422',{roughness:.95});
+function buildGraveRoom(rect,westRange,eastRange){
+  const x0=px(rect.x),x1=px(rect.x+rect.w),z0=px(rect.y),z1=px(rect.y+rect.h);
+  const cx=(x0+x1)/2,cz=(z0+z1)/2,w=x1-x0,d=z1-z0;
+  const g=new THREE.Group();scene.add(g);
+  box(g,cx,-.2,cz,w+.3,.4,d+.3,dirtMat);
+  box(g,cx,1.6,z0-.15,w+.3,3.2,.3,stoneMat);
+  const side=(atX,range)=>{
+    if(range){const rz0=px(range[0]),rz1=px(range[1]);box(g,atX,1.6,(z0+rz0)/2,.25,3.2,rz0-z0+.1,hedgeMat);box(g,atX,1.6,(rz1+z1)/2,.25,3.2,z1-rz1+.1,hedgeMat)}
+    else box(g,atX,1.6,cz,.25,3.2,d+.3,hedgeMat);
+  };
+  side(x0-.12,westRange);side(x1+.12,eastRange);
+  return g;
+}
+const graveChain=[...graveyardRooms,bossRoom];
+graveChain.forEach((r,i)=>buildGraveRoom(r,graveyardDoors[i]?graveyardDoors[i].range:null,graveyardDoors[i+1]?graveyardDoors[i+1].range:null));
+// Gravestones scattered through the graveyard rooms - simple obstacle props, same pattern
+// as the mansion furniture below.
+const graveStoneMat=mat('#8a93a0',{roughness:.85});
+graveyardObstacles.forEach(r=>{const x=px(r.x+r.w/2),z=px(r.y+r.h/2),g=new THREE.Group();scene.add(g);box(g,x,.32,z,.4,.62,.12,graveStoneMat);ball(g,x,.62,z,.2,graveStoneMat,[1,.55,.6])});
+// The boss room's entrance stays permanently barred this phase - the room is reserved,
+// not yet playable. A bigger, more ominous cousin of the mansion's sealed-door prop.
+const bossBar=mat('#2e2a24',{roughness:.85}),bossGlow=mat('#8a2f2f',{emissive:'#c23f3f',emissiveIntensity:1.1});
+if(bossGate){
+  const bgx=px(bossGate.x),bgz=px(bossGate.y);
+  const gate=new THREE.Group();scene.add(gate);
+  box(gate,bgx,1.6,bgz,.3,3.2,1.9,bossBar);
+  for(let i=0;i<3;i++)box(gate,bgx,.5+i*1.1,bgz,.32,.14,2.1,bossBar);
+  ball(gate,bgx,1.6,bgz,.13,bossGlow);
+  gate.add(new THREE.PointLight('#c23f3f',1.6,2.4));
+}
 roomFurniture.forEach((r,i)=>{const x=px(r.x+r.w/2),z=px(r.y+r.h/2),w=(r.w)/scale,d=(r.h)/scale,g=new THREE.Group();scene.add(g);box(g,x,.65,z,w,1.3,d,darkwood);box(g,x,1.36,z,w+.12,.16,d+.12,timber);for(let j=0;j<2;j++){box(g,x,.4+j*.57,z+d/2+.015,w-.18,.44,.07,timber);ball(g,x,.4+j*.57,z+d/2+.08,.055,brass)}if(i===0)for(let j=0;j<5;j++)box(g,x-.8+j*.32,1.7,z,.21,.57,.65,mat(['#576d65','#7a4947','#927745'][j%3]));});
 scene.add(new THREE.HemisphereLight('#8babc5','#25202b',.32));const moon=new THREE.DirectionalLight('#9bbaf3',.78);moon.position.set(-3,10,-5);moon.castShadow=true;moon.shadow.mapSize.set(2048,1024);Object.assign(moon.shadow.camera,{left:-40,right:40,top:20,bottom:-20});moon.shadow.bias=-.001;scene.add(moon);
 // A real collision table with a glowing battery marker and four legs.
@@ -83,7 +123,7 @@ let previous=new THREE.Vector3(),first=true;
 return {render({player,ghosts:states,particles,time,lightOn,lightCharge,maxLightCharge=100,vac,lockedGhost,scare,battery,tableUsed,iceBolt,note,key,coinPickups=[]}){
 sealDoor.visible=!doorUnlocked;
 keyProp.visible=!!key;if(key){keyProp.position.set(px(key.x),.35+Math.sin(time*3)*.08,px(key.y));keyProp.rotation.y=time*1.6;}
-coinPickups.forEach((c,i)=>{const m=coinProps[i];if(!m)return;m.visible=!c.taken;if(!c.taken){m.position.set(px(c.x),.3+Math.sin(time*4+i)*.05,px(c.y));m.rotation.y=time*2.2;}});const x=px(player.x),z=px(player.y);robot.position.set(x,0,z);body.rotation.y=Math.PI/2-player.a;if(!first){roller.rotation.x+=(z-previous.z)/.32;roller.rotation.z-=(x-previous.x)/.32}previous.set(x,0,z);first=false;
+coinPickups.forEach((c,i)=>{const m=coinProps[i];if(!m)return;m.visible=!c.taken;if(!c.taken){m.position.set(px(c.x),.3+Math.sin(time*4+i)*.05,px(c.y));m.rotation.y=time*2.2;const silver=c.kind==='silver';m.material.color.copy(silver?silverColor:goldColor);m.material.emissive.copy(silver?silverEmissive:goldEmissive);}});const x=px(player.x),z=px(player.y);robot.position.set(x,0,z);body.rotation.y=Math.PI/2-player.a;if(!first){roller.rotation.x+=(z-previous.z)/.32;roller.rotation.z-=(x-previous.x)/.32}previous.set(x,0,z);first=false;
 robot.visible=player.hurt<=0||Math.floor(time*18)%2===0;marker.visible=!tableUsed;pickup.visible=!!battery;if(battery){pickup.position.set(px(battery.x),.65+Math.sin(time*4)*.1,px(battery.y));pickup.rotation.y=time*1.8;}
 const lowBattery=lightOn&&lightCharge<maxLightCharge*.2;const flicker=lowBattery?.75+Math.random()*.35:1;
 beam.intensity=lightOn?150*flicker:0;beam.distance=lightOn?7.6:6.4;lamp.material.emissiveIntensity=lightOn?6*flicker:.8;

@@ -1,8 +1,11 @@
 import {createHaunt} from './scene3d.js';
-import {ROOM_SCALE,WORLD,healthTable,bounds,blocked,shopSpot,unlockExteriorDoor,lockExteriorDoor} from './room.js';
+import {ROOM_SCALE,WORLD,healthTable,bounds,blocked,shopSpot,unlockExteriorDoor,lockExteriorDoor,roomAt,generateGraveyard,graveyardCoinSpots,bossGate} from './room.js';
 const canvas=document.querySelector('#game'),$=s=>document.querySelector(s);
+// Generated once at load (not per-restart) so scene3d's static procedural geometry, built
+// once in createHaunt() below, always matches room.js's layout/collision.
+generateGraveyard();
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v)),colors=['#a6f5cd','#ff6a5a','#ffcf92'],types=['flee','melee','ice'];
-let player,ghosts,particles,time=0,last=0,lightOn=false,lightCharge=100,maxLightCharge=100,vac=false,keys={},joy={x:0,y:0},caught=0,active=true,sound=false,ac,noticeTime=0,lockedGhost=null,scare=0,battery=null,tableUsed=false,iceBolt=null,dustCd=0,note=null,maxHp=100,coins=0,hasKey=false,key=null,coinPickups=[],shopOpen=false,upgrades={};
+let player,ghosts,particles,time=0,last=0,lightOn=false,lightCharge=100,maxLightCharge=100,vac=false,keys={},joy={x:0,y:0},caught=0,active=true,sound=false,ac,noticeTime=0,lockedGhost=null,scare=0,battery=null,tableUsed=false,iceBolt=null,dustCd=0,note=null,maxHp=100,coins=0,hasKey=false,key=null,coinPickups=[],shopOpen=false,upgrades={},announcedGraveyard=false,announcedBoss=false;
 // One-time shop upgrades, bought with coins found around the mansion.
 const UPGRADES=[
 {id:'battery',label:'Battery Pack',desc:'+30 max flashlight charge',cost:20,apply:()=>{maxLightCharge+=30;lightCharge=Math.min(maxLightCharge,lightCharge+30)}},
@@ -31,12 +34,15 @@ syncLight();
 }
 function finish(){active=false;lockedGhost=null;release();$('#win small').textContent='POWER DEPLETED';$('#win h2').textContent='Robot offline.';$('#win p').textContent='The ghosts got you. Restart with '+maxHp+' HP and a fresh battery.';$('#again').textContent='Try again';$('#win').hidden=false}
 function reset(){
-maxHp=100;maxLightCharge=100;suctionMul=1;upgrades={};coins=0;hasKey=false;key=null;shopOpen=false;$('#shop').hidden=true;lockExteriorDoor();
+maxHp=100;maxLightCharge=100;suctionMul=1;upgrades={};coins=0;hasKey=false;key=null;shopOpen=false;$('#shop').hidden=true;lockExteriorDoor();announcedGraveyard=false;announcedBoss=false;
 lockedGhost=null;player={x:810*ROOM_SCALE,y:190*ROOM_SCALE,a:-Math.PI/2,hp:maxHp,hurt:0,slow:0};particles=[];scare=0;time=0;caught=0;active=true;vac=false;keys={};joy={x:0,y:0};lightOn=false;lightCharge=maxLightCharge;battery=null;tableUsed=false;iceBolt=null;dustCd=0;note=null;
 // One ghost per mansion room (west/center/east), matching the flee/melee/ice type order.
 ghosts=colors.map((color,i)=>({x:[350,650,1450][i]*ROOM_SCALE,y:[280,280,280][i]*ROOM_SCALE,state:'warning',color,type:types[i],hp:100,stun:0,caught:false,seed:i*2.3,noSuction:0,touching:false,attackTime:0,locked:false,reveal:0,fireCd:1.2,struggleCd:.9}));
-// Three coin pickups scattered through the mansion, one per room, well clear of furniture and doorways.
-coinPickups=[{x:380*ROOM_SCALE,y:300*ROOM_SCALE,v:15,taken:false},{x:650*ROOM_SCALE,y:320*ROOM_SCALE,v:15,taken:false},{x:1450*ROOM_SCALE,y:300*ROOM_SCALE,v:15,taken:false}];
+// Three fixed coin pickups in the mansion, plus the procedural graveyard's gold/silver
+// treasure (generated once at load - see generateGraveyard() below - so its layout matches
+// what scene3d already built; only the taken/collected state resets here).
+coinPickups=[{x:380*ROOM_SCALE,y:300*ROOM_SCALE,v:15,taken:false},{x:650*ROOM_SCALE,y:320*ROOM_SCALE,v:15,taken:false},{x:1450*ROOM_SCALE,y:300*ROOM_SCALE,v:15,taken:false},
+...graveyardCoinSpots.map(c=>({...c,taken:false}))];
 $('#win').hidden=true;$('#knob').style.transform='';$('#vacuum').classList.remove('active');$('#fill').style.width='0%';$('#label').textContent='LIGHT ON TO SPOT · VACUUM TO CAPTURE';$('#flash').innerHTML='<b>✦</b> LIGHT OFF';$('#flash').classList.remove('active');say('It’s dark in here. Click LIGHT to see — but its battery drains, so use it wisely.',5);ui();
 }
 function inBeam(g,range=250,angle=.48){const dx=g.x-player.x,dy=g.y-player.y;return Math.hypot(dx,dy)<range&&Math.cos(Math.atan2(dy,dx)-player.a)>Math.cos(angle)}
@@ -101,7 +107,9 @@ move(mx*dt*(vac?118:185)*slowMul,my*dt*(vac?118:185)*slowMul);
 if(lockValid())player.a=Math.atan2(lockedGhost.y-player.y,lockedGhost.x-player.x);else lockedGhost=null;
 dustCd-=dt;if(mag>.12&&dustCd<=0){dustCd=.06;const back=player.a+Math.PI;for(let i=0;i<2;i++){const ang=back+(Math.random()-.5)*1.4;particles.push({x:player.x+Math.cos(ang)*14,y:player.y+Math.sin(ang)*14,vx:Math.cos(ang)*30+(Math.random()-.5)*20,vy:Math.sin(ang)*30+(Math.random()-.5)*20,life:.35+Math.random()*.25,color:'#8a7a63',kind:'dust'})}}
 if(battery){battery.age+=dt;if(battery.age>.35&&player.hp<maxHp&&Math.hypot(player.x-battery.x,player.y-battery.y)<42){const gain=Math.min(50,maxHp-player.hp);player.hp+=gain;burst(battery.x,battery.y,'#8effbc',30);battery=null;tone(850,.3);say('Recharged +'+gain+' HP!',2);ui()}}
-for(const c of coinPickups){if(!c.taken&&Math.hypot(player.x-c.x,player.y-c.y)<38){c.taken=true;coins+=c.v;burst(c.x,c.y,'#ffd35c',16);tone(820,.12);say('+'+c.v+' coins',1.3);ui()}}
+for(const c of coinPickups){if(!c.taken&&Math.hypot(player.x-c.x,player.y-c.y)<38){c.taken=true;coins+=c.v;burst(c.x,c.y,c.kind==='silver'?'#d8e0e6':'#ffd35c',16);tone(820,.12);say('+'+c.v+' coins',1.3);ui()}}
+if(!announcedGraveyard&&roomAt(player.x,player.y).name.startsWith('grave')){announcedGraveyard=true;say('A graveyard beyond the mansion... treasure glints among the headstones.',3.5)}
+if(!announcedBoss&&bossGate&&Math.hypot(player.x-bossGate.x,player.y-bossGate.y)<170){announcedBoss=true;say('The far gate is sealed shut. Something bigger sleeps beyond — not yet.',3.5)}
 if(key&&!hasKey&&Math.hypot(player.x-key.x,player.y-key.y)<42){hasKey=true;const kx=key.x,ky=key.y;key=null;unlockExteriorDoor();burst(kx,ky,'#ffe9a8',26);tone(760,.3);say('Key acquired! The exterior door has unlocked — head east to the yard.',3.5);ui()}
 updateShop(hasKey&&Math.hypot(player.x-shopSpot.x,player.y-shopSpot.y)<150);
 if(iceBolt){iceBolt.x+=iceBolt.vx*dt;iceBolt.y+=iceBolt.vy*dt;iceBolt.life-=dt;if(Math.hypot(iceBolt.x-player.x,iceBolt.y-player.y)<40){player.slow=2.2;burst(iceBolt.x,iceBolt.y,'#bdeeff',18);tone(300,.25);say('Frozen! Moving slower for a moment.',1.5);iceBolt=null}else if(iceBolt.life<=0)iceBolt=null}

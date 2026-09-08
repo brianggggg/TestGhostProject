@@ -39,10 +39,13 @@ const wallsBase=[
   {x:1140,y:380,w:480,h:WT},
   {x:1620,y:-WT,w:90,h:DOOR[0]-(-WT)},
   {x:1620,y:DOOR[1],w:90,h:(380+WT)-DOOR[1]},
-  // yard: north, south, east (its own outer boundary - west is the exterior doorway)
+  // yard: north, south (its own outer boundary). East is a permanently-open doorway into
+  // the graveyard beyond - no separate key needed, since reaching the yard already means
+  // the mansion is cleared.
   {x:1710,y:-WT,w:400+WT,h:WT},
   {x:1710,y:380,w:400+WT,h:WT},
-  {x:1710+400,y:-WT,w:WT,h:380+2*WT},
+  {x:1710+400,y:-WT,w:WT,h:DOOR[0]-(-WT)},
+  {x:1710+400,y:DOOR[1],w:WT,h:(380+WT)-DOOR[1]},
 ];
 const walls=wallsBase.map(r=>({x:r.x*ROOM_SCALE,y:r.y*ROOM_SCALE,w:r.w*ROOM_SCALE,h:r.h*ROOM_SCALE}));
 // Seals the exterior doorway gap until the mansion key is found - removed from the
@@ -63,7 +66,70 @@ export const furniture=[
 ].map(r=>({x:r.x*ROOM_SCALE,y:r.y*ROOM_SCALE,w:r.w*ROOM_SCALE,h:r.h*ROOM_SCALE}));
 export const healthTable={x:(570+270)*ROOM_SCALE,y:70*ROOM_SCALE,w:112,h:76};
 export const obstacles=[...furniture,healthTable,...walls];
-export const bounds={left:0,right:(1710+400)*ROOM_SCALE,top:0,bottom:380*ROOM_SCALE};
-export function blocked(x,y,padding=22){return obstacles.some(r=>x>r.x-padding&&x<r.x+r.w+padding&&y>r.y-padding&&y<r.y+r.h+padding)||lockSeal.some(r=>x>r.x-padding&&x<r.x+r.w+padding&&y>r.y-padding&&y<r.y+r.h+padding)}
-export function roomAt(x,y){return [...rooms,yard].find(r=>x>=r.x&&x<=r.x+r.w&&y>=r.y&&y<=r.y+r.h)||rooms[1]}
+// bounds grows once generateGraveyard() runs (mutable so blocked()/movement clamps pick up
+// the new outer edge live); starts at the mansion+yard extent as a safe default.
+export let bounds={left:0,right:(1710+400)*ROOM_SCALE,top:0,bottom:380*ROOM_SCALE};
+const hit=(r,x,y,padding)=>x>r.x-padding&&x<r.x+r.w+padding&&y>r.y-padding&&y<r.y+r.h+padding;
+export function blocked(x,y,padding=22){
+  return obstacles.some(r=>hit(r,x,y,padding))||lockSeal.some(r=>hit(r,x,y,padding))||
+    graveyardWalls.some(r=>hit(r,x,y,padding))||graveyardObstacles.some(r=>hit(r,x,y,padding))||bossSeal.some(r=>hit(r,x,y,padding));
+}
+export function roomAt(x,y){return [...rooms,yard,...graveyardRooms,bossRoom].filter(Boolean).find(r=>x>=r.x&&x<=r.x+r.w&&y>=r.y&&y<=r.y+r.h)||rooms[1]}
 export const DOOR_GAME=[DOOR[0]*ROOM_SCALE,DOOR[1]*ROOM_SCALE];
+
+// ---- Procedural graveyard, past the yard - regenerated fresh each game via generateGraveyard().
+// Continues the same row/doorway/blocked() model as the mansion (rooms in a shared y band,
+// connected by wall gaps) so no new collision system is needed. Room widths and each
+// doorway's vertical placement are randomized per generation for real per-run variety. The
+// chain ends in a boss room that stays permanently sealed this phase - the space is
+// reserved, not the fight itself (that's a later phase).
+const GY_COUNT=5,GY_MIN_W=380,GY_MAX_W=560,GY_GAP=90,GY_DOOR_H=110,GY_MARGIN=30,BOSS_W=440;
+export let graveyardRooms=[],bossRoom=null,graveyardCoinSpots=[],graveyardDoors=[],bossGate=null,graveyardObstacles=[];
+let graveyardWalls=[],bossSeal=[];
+const rand=(a,b)=>a+Math.random()*(b-a),ri=(a,b)=>Math.floor(rand(a,b+1));
+export function generateGraveyard(){
+  const rooms_=[],walls_=[],stones_=[],coins_=[],doors_=[];
+  let cursorX=1710+400+GY_GAP; // base units, right after the yard's east wall+doorway gap
+  for(let i=0;i<GY_COUNT;i++){
+    const w=ri(GY_MIN_W,GY_MAX_W);
+    rooms_.push({x:cursorX,y:0,w,h:380,name:'grave'+(i+1)});
+    cursorX+=w+GY_GAP;
+  }
+  const boss={x:cursorX,y:0,w:BOSS_W,h:380,name:'boss'};
+  const chain=[...rooms_,boss];
+  for(const r of chain){walls_.push({x:r.x,y:-WT,w:r.w,h:WT});walls_.push({x:r.x,y:380,w:r.w,h:WT})}
+  // The yard/grave1 seam is already opened (fixed DOOR range) in the static wallsBase above.
+  doors_.push({x:(1710+400+GY_GAP/2)*ROOM_SCALE,range:[DOOR[0]*ROOM_SCALE,DOOR[1]*ROOM_SCALE],isBoss:false});
+  for(let i=1;i<chain.length;i++){
+    const left=chain[i-1],right=chain[i],gapX=left.x+left.w;
+    const doorStart=ri(GY_MARGIN,380-GY_MARGIN-GY_DOOR_H);
+    walls_.push({x:gapX,y:-WT,w:GY_GAP,h:doorStart-(-WT)});
+    walls_.push({x:gapX,y:doorStart+GY_DOOR_H,w:GY_GAP,h:(380+WT)-(doorStart+GY_DOOR_H)});
+    doors_.push({x:(gapX+GY_GAP/2)*ROOM_SCALE,range:[doorStart*ROOM_SCALE,(doorStart+GY_DOOR_H)*ROOM_SCALE],isBoss:right===boss});
+  }
+  // Gravestones: a handful of small obstacles per graveyard room (not the boss room).
+  for(const r of rooms_){
+    const n=ri(3,6);
+    for(let k=0;k<n;k++)stones_.push({x:r.x+rand(60,r.w-60),y:rand(60,380-60),w:34,h:34});
+  }
+  // Treasure: several gold/silver pickups per room - much more than the mansion's 3 coins.
+  for(const r of rooms_){
+    const n=ri(2,4);
+    for(let k=0;k<n;k++){
+      const gold=Math.random()<0.5;
+      coins_.push({x:r.x+rand(60,r.w-60),y:rand(60,380-60),v:gold?ri(18,30):ri(8,14),kind:gold?'gold':'silver'});
+    }
+  }
+  const scale=r=>({x:r.x*ROOM_SCALE,y:r.y*ROOM_SCALE,w:r.w*ROOM_SCALE,h:r.h*ROOM_SCALE,name:r.name});
+  graveyardRooms=rooms_.map(scale);
+  bossRoom=scale(boss);
+  graveyardWalls=walls_.map(r=>({x:r.x*ROOM_SCALE,y:r.y*ROOM_SCALE,w:r.w*ROOM_SCALE,h:r.h*ROOM_SCALE}));
+  graveyardObstacles=stones_.map(r=>({x:r.x*ROOM_SCALE,y:r.y*ROOM_SCALE,w:r.w*ROOM_SCALE,h:r.h*ROOM_SCALE}));
+  graveyardCoinSpots=coins_.map(c=>({x:c.x*ROOM_SCALE,y:c.y*ROOM_SCALE,v:c.v,kind:c.kind}));
+  graveyardDoors=doors_;
+  const bossDoor=doors_.find(d=>d.isBoss);
+  bossSeal=[{x:bossDoor.x-GY_GAP*ROOM_SCALE/2,y:bossDoor.range[0],w:GY_GAP*ROOM_SCALE,h:bossDoor.range[1]-bossDoor.range[0]}];
+  bossGate={x:bossDoor.x,y:(bossDoor.range[0]+bossDoor.range[1])/2};
+  bounds={left:0,right:(boss.x+boss.w)*ROOM_SCALE,top:0,bottom:380*ROOM_SCALE};
+  return {rooms:graveyardRooms,bossRoom};
+}
