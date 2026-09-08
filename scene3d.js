@@ -1,5 +1,5 @@
 import * as THREE from './three.module.js';
-import {WORLD,ROOM_GROWTH,healthTable} from './room.js';
+import {WORLD,healthTable,rooms,roomAt,DOOR_GAME,furniture as roomFurniture} from './room.js';
 export function createHaunt(canvas){
 const renderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:false});renderer.setPixelRatio(Math.min(devicePixelRatio||1,1.7));renderer.setSize(720,720,false);renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.25;
 const scene=new THREE.Scene();scene.background=new THREE.Color('#080c15');scene.fog=new THREE.FogExp2('#080c15',.026);
@@ -9,17 +9,30 @@ const wood=new THREE.TextureLoader().load('wood.png');wood.colorSpace=THREE.SRGB
 const timber=mat('#82745b',{map:wood}),darkwood=mat('#4b3a30',{map:wood}),metal=mat('#8caaa6',{metalness:.65,roughness:.37}),black=mat('#101b26'),brass=mat('#c39250',{metalness:.55});
 function box(parent,x,y,z,w,h,d,m){const o=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),m);o.position.set(x,y,z);o.castShadow=true;o.receiveShadow=true;parent.add(o);return o}
 function ball(parent,x,y,z,r,m,s=[1,1,1]){const o=new THREE.Mesh(new THREE.SphereGeometry(r,20,14),m);o.position.set(x,y,z);o.scale.set(...s);o.castShadow=true;parent.add(o);return o}
-const room=new THREE.Group();room.scale.set(ROOM_GROWTH,1,ROOM_GROWTH);scene.add(room);const oldPx=x=>(x-576)/60;
-box(room,0,-.2,1,17.5,.4,14.4,timber);
-// A cutaway front keeps the room playable from the angled camera.
-box(room,0,2,-6.4,17.5,4,.3,darkwood);box(room,-8.65,1.1,1,.25,2.2,14.5,darkwood);box(room,8.65,1.1,1,.25,2.2,14.5,darkwood);
-for(let x=-8;x<=8;x+=2){box(room,x,2,-6.16,.13,4,.13,brass);box(room,x,.55,-6.1,1.75,.85,.1,mat('#293638'))}
-box(room,0,.13,-6.13,17.2,.16,.2,brass);box(room,0,3.9,-6.15,17.3,.16,.22,brass);
-const windowMat=mat('#7b9abd',{emissive:'#527dae',emissiveIntensity:.65});box(room,0,2.6,-6.17,2.4,2.1,.08,black);box(room,0,2.6,-6.08,2.1,1.9,.05,windowMat);box(room,0,2.6,-5.99,.09,1.9,.1,brass);box(room,0,2.6,-5.98,2.1,.09,.1,brass);
-const rug=mat('#283e3b');box(room,-.05,.025,.38,6.15,.025,6.25,rug);for(const x of [-3,3])box(room,x,.044,.38,.06,.014,6.1,brass);for(const z of [-2.61,3.37])box(room,0,.044,z,6,.014,.06,brass);
-const furniture=[{x:80,y:140,w:110,h:72},{x:526,y:138,w:105,h:85},{x:527,y:459,w:105,h:82}];furniture.forEach((r,i)=>{const x=oldPx((r.x+r.w/2)*1.6),z=oldPx((r.y+r.h/2)*1.6),w=r.w*1.6/scale,d=r.h*1.6/scale;box(room,x,.65,z,w,1.3,d,darkwood);box(room,x,1.36,z,w+.12,.16,d+.12,timber);for(let j=0;j<2;j++){box(room,x,.4+j*.57,z+d/2+.015,w-.18,.44,.07,timber);ball(room,x,.4+j*.57,z+d/2+.08,.055,brass)}if(i===0)for(let j=0;j<5;j++)box(room,x-.8+j*.32,1.7,z,.21,.57,.65,mat(['#576d65','#7a4947','#927745'][j%3]));});
-box(room,oldPx(136*1.6),.03,oldPx(548*1.6),2.55,.06,2.1,darkwood);for(let i=0;i<5;i++)box(room,oldPx(136*1.6),.07,oldPx(515*1.6)+i*.43,2.4,.035,.035,brass);
-scene.add(new THREE.HemisphereLight('#8babc5','#25202b',.32));const moon=new THREE.DirectionalLight('#9bbaf3',.78);moon.position.set(-3,10,-5);moon.castShadow=true;moon.shadow.mapSize.set(1024,1024);Object.assign(moon.shadow.camera,{left:-17,right:17,top:17,bottom:-17});moon.shadow.bias=-.001;scene.add(moon);
+// One mansion room's shell, built directly in scene units via px() - the same conversion used
+// for every entity, so static geometry and collision always agree. West/east can each be a
+// solid wall or an open doorway (matching room.js's wall-gap collision); south stays open
+// (the camera-facing cutaway) and north always gets the back wall + window treatment.
+function buildRoom(rect,west,east){
+const x0=px(rect.x),x1=px(rect.x+rect.w),z0=px(rect.y),z1=px(rect.y+rect.h);
+const cx=(x0+x1)/2,cz=(z0+z1)/2,w=x1-x0,d=z1-z0;
+const g=new THREE.Group();scene.add(g);
+box(g,cx,-.2,cz,w+.3,.4,d+.3,timber);
+box(g,cx,2,z0-.15,w+.3,4,.3,darkwood);
+for(let fx=x0+1;fx<=x1-1;fx+=2){box(g,fx,2,z0-.02,.13,4,.13,brass);box(g,fx,.55,z0+.04,1.75,.85,.1,mat('#293638'))}
+box(g,cx,.13,z0+.02,w+.2,.16,.2,brass);box(g,cx,3.9,z0,w+.2,.16,.22,brass);
+const windowMat=mat('#7b9abd',{emissive:'#527dae',emissiveIntensity:.65});box(g,cx,2.6,z0-.17,2.4,2.1,.08,black);box(g,cx,2.6,z0-.08,2.1,1.9,.05,windowMat);box(g,cx,2.6,z0+.01,.09,1.9,.1,brass);box(g,cx,2.6,z0+.02,2.1,.09,.1,brass);
+const rugW=Math.max(1,w-1.2),rugD=Math.max(1,d-1.4);box(g,cx,.025,cz+.15,rugW,.025,rugD,mat('#283e3b'));
+const doorZ0=px(DOOR_GAME[0]),doorZ1=px(DOOR_GAME[1]);
+const side=(atX,open)=>{if(open){box(g,atX,1.1,(z0+doorZ0)/2,.25,2.2,doorZ0-z0+.1,darkwood);box(g,atX,1.1,(doorZ1+z1)/2,.25,2.2,z1-doorZ1+.1,darkwood)}else box(g,atX,1.1,cz,.25,2.2,d+.3,darkwood)};
+side(x0-.12,west==='door');side(x1+.12,east==='door');
+return g;
+}
+buildRoom(rooms[0],'solid','door');
+buildRoom(rooms[1],'door','door');
+buildRoom(rooms[2],'door','solid');
+roomFurniture.forEach((r,i)=>{const x=px(r.x+r.w/2),z=px(r.y+r.h/2),w=(r.w)/scale,d=(r.h)/scale,g=new THREE.Group();scene.add(g);box(g,x,.65,z,w,1.3,d,darkwood);box(g,x,1.36,z,w+.12,.16,d+.12,timber);for(let j=0;j<2;j++){box(g,x,.4+j*.57,z+d/2+.015,w-.18,.44,.07,timber);ball(g,x,.4+j*.57,z+d/2+.08,.055,brass)}if(i===0)for(let j=0;j<5;j++)box(g,x-.8+j*.32,1.7,z,.21,.57,.65,mat(['#576d65','#7a4947','#927745'][j%3]));});
+scene.add(new THREE.HemisphereLight('#8babc5','#25202b',.32));const moon=new THREE.DirectionalLight('#9bbaf3',.78);moon.position.set(-3,10,-5);moon.castShadow=true;moon.shadow.mapSize.set(2048,1024);Object.assign(moon.shadow.camera,{left:-40,right:40,top:20,bottom:-20});moon.shadow.bias=-.001;scene.add(moon);
 // A real collision table with a glowing battery marker and four legs.
 const table=new THREE.Group();table.position.set(px(healthTable.x+healthTable.w/2),0,px(healthTable.y+healthTable.h/2));scene.add(table);
 const tw=healthTable.w/60,td=healthTable.h/60;box(table,0,.94,0,tw,.16,td,timber);for(const x of [-tw/2+.13,tw/2-.13])for(const z of [-td/2+.13,td/2-.13])box(table,x,.43,z,.14,.86,.14,darkwood);
@@ -71,6 +84,7 @@ tether.visible=!!(vac&&lockedGhost&&!lockedGhost.caught&&lockedGhost.stun>0&&Mat
 drawParticles(sparkSys,particles.filter(p=>p.kind!=='dust'),p=>.8+p.life*.5);
 drawParticles(dustSys,particles.filter(p=>p.kind==='dust'),p=>.05+p.life*.2);
 noteProp.visible=!!note;if(note){noteProp.position.set(px(note.x),.05+Math.sin(time*2)*.015,px(note.y));noteProp.rotation.y=Math.sin(time*.7)*.2;}
-const focusX=THREE.MathUtils.clamp(x,-4.5*ROOM_GROWTH,4.5*ROOM_GROWTH),focusZ=THREE.MathUtils.clamp(z,-2*ROOM_GROWTH,4*ROOM_GROWTH);camera.position.set(focusX,9.6,focusZ+9.8);camera.lookAt(focusX,.6,focusZ-.6);if(scare>0)camera.position.x+=Math.sin(time*65)*scare*.14;renderer.render(scene,camera);
+const curRoom=roomAt(player.x,player.y),rx0=px(curRoom.x),rx1=px(curRoom.x+curRoom.w),rz0=px(curRoom.y),rz1=px(curRoom.y+curRoom.h),margin=1.3;
+const focusX=THREE.MathUtils.clamp(x,rx0+margin,rx1-margin),focusZ=THREE.MathUtils.clamp(z,rz0+margin,rz1-margin);camera.position.set(focusX,9.6,focusZ+9.8);camera.lookAt(focusX,.6,focusZ-.8);if(scare>0)camera.position.x+=Math.sin(time*65)*scare*.14;renderer.render(scene,camera);
 }};
 }

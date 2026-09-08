@@ -14,8 +14,9 @@ const chargePct=Math.round(lightCharge);$('#light-text').textContent=chargePct+'
 }
 function finish(won){active=false;lockedGhost=null;release();$('#win small').textContent=won?'ROOM CLEAR':'POWER DEPLETED';$('#win h2').textContent=won?'A tidy little haunting.':'Robot offline.';$('#win p').textContent=won?'Three ghosts safely bottled. '+player.hp+' HP remaining. A note flutters down: “Congrats — the next room holds the key to the manor.”':'The ghosts got you. Restart with 100 HP and a fresh battery.';$('#again').textContent=won?'Play again':'Try again';$('#win').hidden=false}
 function reset(){
-lockedGhost=null;player={x:340*ROOM_SCALE,y:526*ROOM_SCALE,a:-Math.PI/2,hp:100,hurt:0,slow:0};particles=[];scare=0;time=0;caught=0;active=true;vac=false;keys={};joy={x:0,y:0};lightOn=false;lightCharge=100;battery=null;tableUsed=false;iceBolt=null;dustCd=0;note=null;
-ghosts=colors.map((color,i)=>({x:[210,505,500][i]*ROOM_SCALE,y:[215,228,465][i]*ROOM_SCALE,state:'warning',color,type:types[i],hp:100,stun:0,caught:false,seed:i*2.3,noSuction:0,touching:false,attackTime:0,locked:false,reveal:0,fireCd:1.2,struggleCd:.9}));
+lockedGhost=null;player={x:810*ROOM_SCALE,y:190*ROOM_SCALE,a:-Math.PI/2,hp:100,hurt:0,slow:0};particles=[];scare=0;time=0;caught=0;active=true;vac=false;keys={};joy={x:0,y:0};lightOn=false;lightCharge=100;battery=null;tableUsed=false;iceBolt=null;dustCd=0;note=null;
+// One ghost per mansion room (west/center/east), matching the flee/melee/ice type order.
+ghosts=colors.map((color,i)=>({x:[350,650,1450][i]*ROOM_SCALE,y:[280,280,280][i]*ROOM_SCALE,state:'warning',color,type:types[i],hp:100,stun:0,caught:false,seed:i*2.3,noSuction:0,touching:false,attackTime:0,locked:false,reveal:0,fireCd:1.2,struggleCd:.9}));
 $('#win').hidden=true;$('#knob').style.transform='';$('#vacuum').classList.remove('active');$('#fill').style.width='0%';$('#label').textContent='LIGHT ON TO SPOT · VACUUM TO CAPTURE';$('#flash').innerHTML='<b>✦</b> LIGHT OFF';$('#flash').classList.remove('active');say('It’s dark in here. Click LIGHT to see — but its battery drains, so use it wisely.',5);ui();
 }
 function inBeam(g,range=250,angle=.48){const dx=g.x-player.x,dy=g.y-player.y;return Math.hypot(dx,dy)<range&&Math.cos(Math.atan2(dy,dx)-player.a)>Math.cos(angle)}
