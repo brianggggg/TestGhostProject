@@ -1,5 +1,5 @@
 import * as THREE from './three.module.js';
-import {WORLD,healthTable,rooms,roomAt,DOOR_GAME,furniture as roomFurniture} from './room.js';
+import {WORLD,healthTable,rooms,roomAt,DOOR_GAME,furniture as roomFurniture,yard,shopSpot,doorUnlocked} from './room.js';
 export function createHaunt(canvas){
 const renderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:false});renderer.setPixelRatio(Math.min(devicePixelRatio||1,1.7));renderer.setSize(720,720,false);renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.25;
 const scene=new THREE.Scene();scene.background=new THREE.Color('#080c15');scene.fog=new THREE.FogExp2('#080c15',.026);
@@ -30,7 +30,33 @@ return g;
 }
 buildRoom(rooms[0],'solid','door');
 buildRoom(rooms[1],'door','door');
-buildRoom(rooms[2],'door','solid');
+buildRoom(rooms[2],'door','door');
+buildRoom(yard,'door','solid');
+// The exterior doorway (room 2 <-> yard) starts sealed behind a barred door until the
+// mansion key is found - doorUnlocked is a live ES-module binding, re-read every render().
+const exteriorX=px(rooms[2].x+rooms[2].w),exDoorZ0=px(DOOR_GAME[0]),exDoorZ1=px(DOOR_GAME[1]);
+const sealMat=mat('#5a4632',{roughness:.85}),lockGlow=mat('#ffcf5c',{emissive:'#ffb92e',emissiveIntensity:1.4});
+const sealDoor=new THREE.Group();scene.add(sealDoor);
+box(sealDoor,exteriorX,1.1,(exDoorZ0+exDoorZ1)/2,.22,2.2,exDoorZ1-exDoorZ0-.1,sealMat);
+ball(sealDoor,exteriorX,1.1,(exDoorZ0+exDoorZ1)/2,.09,lockGlow);
+// The little shop on wheels, parked out in the yard.
+const shopWood=mat('#8a5a3c',{roughness:.8}),shopRoof=mat('#c94f4f',{roughness:.7}),wheelMat=mat('#2a2019',{roughness:.9});
+const shop=new THREE.Group();shop.position.set(px(shopSpot.x),0,px(shopSpot.y));scene.add(shop);
+box(shop,0,.55,0,1.5,.75,.85,shopWood);
+box(shop,0,.98,0,1.65,.1,.95,darkwood);
+for(const wx of [-.6,.6])for(const wz of [-.35,.35]){const wheel=new THREE.Mesh(new THREE.CylinderGeometry(.22,.22,.12,16),wheelMat);wheel.rotation.z=Math.PI/2;wheel.position.set(wx,.22,wz);wheel.castShadow=true;shop.add(wheel)}
+for(const px2 of [-.68,.68])box(shop,px2,1.6,-.38,.06,1.3,.06,darkwood);
+box(shop,0,2.28,0,1.7,.08,1.05,shopRoof);
+box(shop,0,1.25,.45,.7,.42,.04,mat('#f4e6c1',{roughness:.9}));
+shop.add(new THREE.PointLight('#ffd98a',2.2,3));
+// A dropped mansion key - walk-over pickup, same pattern as the health-table battery.
+const keyMat=mat('#ffd35c',{metalness:.6,roughness:.3,emissive:'#c9932e',emissiveIntensity:.5});
+const keyProp=new THREE.Group();scene.add(keyProp);
+ball(keyProp,0,0,0,.12,keyMat);box(keyProp,0,0,.16,.05,.05,.24,keyMat);box(keyProp,.05,0,.3,.02,.08,.03,keyMat);box(keyProp,-.05,0,.32,.02,.06,.03,keyMat);
+keyProp.add(new THREE.PointLight('#ffd35c',2,2));keyProp.visible=false;
+// Three coin pickups, one per mansion room - small preallocated pool, same as the ghosts array.
+const coinMat=mat('#ffd35c',{metalness:.5,roughness:.3,emissive:'#e0a92e',emissiveIntensity:.6});
+const coinProps=[0,1,2].map(()=>{const c=new THREE.Mesh(new THREE.CylinderGeometry(.13,.13,.035,18),coinMat);c.rotation.x=Math.PI/2;c.visible=false;c.castShadow=true;scene.add(c);return c});
 roomFurniture.forEach((r,i)=>{const x=px(r.x+r.w/2),z=px(r.y+r.h/2),w=(r.w)/scale,d=(r.h)/scale,g=new THREE.Group();scene.add(g);box(g,x,.65,z,w,1.3,d,darkwood);box(g,x,1.36,z,w+.12,.16,d+.12,timber);for(let j=0;j<2;j++){box(g,x,.4+j*.57,z+d/2+.015,w-.18,.44,.07,timber);ball(g,x,.4+j*.57,z+d/2+.08,.055,brass)}if(i===0)for(let j=0;j<5;j++)box(g,x-.8+j*.32,1.7,z,.21,.57,.65,mat(['#576d65','#7a4947','#927745'][j%3]));});
 scene.add(new THREE.HemisphereLight('#8babc5','#25202b',.32));const moon=new THREE.DirectionalLight('#9bbaf3',.78);moon.position.set(-3,10,-5);moon.castShadow=true;moon.shadow.mapSize.set(2048,1024);Object.assign(moon.shadow.camera,{left:-40,right:40,top:20,bottom:-20});moon.shadow.bias=-.001;scene.add(moon);
 // A real collision table with a glowing battery marker and four legs.
@@ -54,9 +80,12 @@ function drawParticles(sys,list,heightFn){let n=0;for(let k=0;k<list.length&&n<s
 // A small dropped note - appears once the final ghost is captured.
 const noteMat=mat('#e9dcb8',{roughness:.9});const noteProp=new THREE.Group();scene.add(noteProp);box(noteProp,0,0,0,.34,.02,.44,noteMat);box(noteProp,0,.011,0,.22,.002,.02,mat('#8a7350'));box(noteProp,0,.011,-.08,.16,.002,.015,mat('#8a7350'));noteProp.add(new THREE.PointLight('#fff3cf',1.4,1.6));noteProp.visible=false;
 let previous=new THREE.Vector3(),first=true;
-return {render({player,ghosts:states,particles,time,lightOn,lightCharge,vac,lockedGhost,scare,battery,tableUsed,iceBolt,note}){const x=px(player.x),z=px(player.y);robot.position.set(x,0,z);body.rotation.y=Math.PI/2-player.a;if(!first){roller.rotation.x+=(z-previous.z)/.32;roller.rotation.z-=(x-previous.x)/.32}previous.set(x,0,z);first=false;
+return {render({player,ghosts:states,particles,time,lightOn,lightCharge,maxLightCharge=100,vac,lockedGhost,scare,battery,tableUsed,iceBolt,note,key,coinPickups=[]}){
+sealDoor.visible=!doorUnlocked;
+keyProp.visible=!!key;if(key){keyProp.position.set(px(key.x),.35+Math.sin(time*3)*.08,px(key.y));keyProp.rotation.y=time*1.6;}
+coinPickups.forEach((c,i)=>{const m=coinProps[i];if(!m)return;m.visible=!c.taken;if(!c.taken){m.position.set(px(c.x),.3+Math.sin(time*4+i)*.05,px(c.y));m.rotation.y=time*2.2;}});const x=px(player.x),z=px(player.y);robot.position.set(x,0,z);body.rotation.y=Math.PI/2-player.a;if(!first){roller.rotation.x+=(z-previous.z)/.32;roller.rotation.z-=(x-previous.x)/.32}previous.set(x,0,z);first=false;
 robot.visible=player.hurt<=0||Math.floor(time*18)%2===0;marker.visible=!tableUsed;pickup.visible=!!battery;if(battery){pickup.position.set(px(battery.x),.65+Math.sin(time*4)*.1,px(battery.y));pickup.rotation.y=time*1.8;}
-const lowBattery=lightOn&&lightCharge<20;const flicker=lowBattery?.75+Math.random()*.35:1;
+const lowBattery=lightOn&&lightCharge<maxLightCharge*.2;const flicker=lowBattery?.75+Math.random()*.35:1;
 beam.intensity=lightOn?150*flicker:0;beam.distance=lightOn?7.6:6.4;lamp.material.emissiveIntensity=lightOn?6*flicker:.8;
 metal.emissive.set(player.slow>0?'#3aa0ff':'#000000');
 states.forEach((g,i)=>{const o=ghosts[i];o.visible=!g.caught&&g.state!=='hidden';if(!o.visible)return;
