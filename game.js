@@ -1,5 +1,5 @@
 import {createHaunt} from './scene3d.js';
-import {ROOM_SCALE,WORLD,healthTable,bounds,blocked,shopSpot,unlockExteriorDoor,lockExteriorDoor,roomAt,generateGraveyard,graveyardCoinSpots,graveyardDoors,mansionDoors,bossGate,graveyardGhostSpawns,bossSpawn,unlockBossGate,lockBossGate} from './room.js';
+import {ROOM_SCALE,WORLD,healthTable,bounds,blocked,shopSpot,unlockExteriorDoor,lockExteriorDoor,roomAt,generateGraveyard,graveyardCoinSpots,graveyardDoors,mansionDoors,bossGate,graveyardGhostSpawns,bossSpawn,unlockBossGate,lockBossGate,puzzleGlyphs,streetGate,unlockStreetDoor,lockStreetDoor} from './room.js';
 const canvas=document.querySelector('#game'),$=s=>document.querySelector(s);
 // Generated once at load (not per-restart) so scene3d's static procedural geometry, built
 // once in createHaunt() below, always matches room.js's layout/collision.
@@ -14,9 +14,11 @@ let player,ghosts,particles,time=0,last=0,lightOn=false,lightCharge=100,maxLight
 // permanent barred gate, and the mansion's locked exterior door is its own lock mechanic -
 // neither belongs here). scene3d.js builds its door props in this exact same order.
 const allDoors=[...mansionDoors,...graveyardDoors.filter(d=>!d.isBoss)];
-// Signed per-door state: 0 closed, +1/-1 open and swung to that side - whichever side the
-// robot last bumped it from, so the same door can bang open either way.
-let doorOpen=allDoors.map(()=>0);
+// Signed per-door swing, continuous in [-1,1]: magnitude is how far the robot has shouldered
+// the door open, sign is which way it is swinging. doorSide latches the side for the whole
+// pass; doorHit gates the one-shot bang so it fires on the shove, not every frame.
+const DOOR_REACH=110; // how far out the robot starts pushing the panel, in game units
+let doorOpen=allDoors.map(()=>0),doorSide=allDoors.map(()=>0),doorHit=allDoors.map(()=>false);
 // One-time shop upgrades, bought with coins found around the mansion.
 const UPGRADES=[
 {id:'battery',label:'Battery Pack',desc:'+30 max flashlight charge',cost:20,apply:()=>{maxLightCharge+=30;lightCharge=Math.min(maxLightCharge,lightCharge+30)}},
@@ -24,6 +26,12 @@ const UPGRADES=[
 {id:'hp',label:'Reinforced Plating',desc:'+25 max HP',cost:20,apply:()=>{maxHp+=25;player.hp=Math.min(maxHp,player.hp+25)}},
 ];
 let suctionMul=1;
+// The boss room's sigil puzzle, armed once the boss is bottled. Each sigil charges while the
+// flashlight is on it and bleeds away when it isn't, so the puzzle is a routing problem under
+// a decay clock (and against the battery) rather than a memory test. All four lit at once
+// opens the way out to the street.
+const GLYPH_CHARGE=1.2,GLYPH_DECAY=12;
+let puzzleActive=false,puzzleSolved=false,glyphCharge=[],glyphLit=[],enteredStreet=false;
 function say(t,d=2.5){noticeTime=d;$('#message').textContent=t}
 function tone(f,d=.1){if(!sound)return;try{ac??=new(window.AudioContext||window.webkitAudioContext)();ac.resume();const o=ac.createOscillator(),g=ac.createGain();o.type='sine';o.frequency.setValueAtTime(f,ac.currentTime);o.frequency.exponentialRampToValueAtTime(f*1.3,ac.currentTime+d);g.gain.setValueAtTime(.055,ac.currentTime);g.gain.exponentialRampToValueAtTime(.001,ac.currentTime+d);o.connect(g).connect(ac.destination);o.start();o.stop(ac.currentTime+d)}catch{}}
 function burst(x,y,color,n){for(let i=0;i<n;i++)particles.push({x,y,vx:(Math.random()-.5)*200,vy:(Math.random()-.5)*200,life:.5+Math.random()*.5,color})}
@@ -40,19 +48,24 @@ function ui(){
 $('#count').textContent='●'.repeat(caught)+'○'.repeat(3-caught)+'   '+caught+' / 3 captured';
 $('#boss-count').hidden=!(announcedGraveyard||graveCaught>0);
 $('#boss-count').textContent='👻 '+graveCaught+' / 4';
+const litCount=glyphLit.filter(Boolean).length;
+$('#puzzle-status').hidden=!puzzleActive;
+$('#puzzle-status').textContent=puzzleSolved?'✦ way out open':'✦ '+litCount+' / '+glyphLit.length+' sigils lit';
 $('#health-text').textContent=player.hp+' / '+maxHp+' HP';$('#health-fill').style.width=(player.hp/maxHp*100)+'%';$('#health').setAttribute('aria-valuemax',maxHp);$('#health').setAttribute('aria-valuenow',player.hp);$('#health').classList.toggle('low',player.hp<=maxHp*.25);
 $('#battery-status').textContent=tableUsed?(battery?'Battery ready · +50 HP':'Battery used'):'Bump the green-marked table · +50 HP';
 $('#coins-text').textContent=(hasKey?'🔑 ':'')+'🪙 '+coins;
 syncLight();
 }
 function finish(){active=false;lockedGhost=null;release();$('#win small').textContent='POWER DEPLETED';$('#win h2').textContent='Robot offline.';$('#win p').textContent='The ghosts got you. Restart with '+maxHp+' HP and a fresh battery.';$('#again').textContent='Try again';$('#win').hidden=false}
-function finishVictory(){active=false;lockedGhost=null;release();$('#win small').textContent='BOSS DEFEATED';$('#win h2').textContent='The manor is finally free.';$('#win p').textContent='You bottled the boss with '+player.hp+' HP to spare. Well fought.';$('#again').textContent='Play again';$('#win').hidden=false}
+function finishVictory(){active=false;lockedGhost=null;release();$('#win small').textContent='OUT ON THE STREET';$('#win h2').textContent='You made it out.';$('#win p').textContent='Boss bottled, sigils lit, and the manor behind you — out with '+player.hp+' HP and '+coins+' coins.';$('#again').textContent='Play again';$('#win').hidden=false}
 function spawnBoss(){
 if(bossSpawned)return;bossSpawned=true;
 ghosts.push({x:bossSpawn.x,y:bossSpawn.y,state:'roam',color:'#c23f3f',type:'boss',zone:'boss',hp:480,maxHpBoss:480,phase:0,stunImmuneCd:0,stun:0,caught:false,seed:19,noSuction:0,touching:false,attackTime:0,locked:false,reveal:1,fireCd:1.6,struggleCd:.9});
 }
 function reset(){
-maxHp=100;maxLightCharge=100;suctionMul=1;upgrades={};coins=0;hasKey=false;key=null;shopOpen=false;$('#shop').hidden=true;lockExteriorDoor();lockBossGate();announcedGraveyard=false;announcedBoss=false;doorOpen=allDoors.map(()=>0);graveCaught=0;bossSpawned=false;
+maxHp=100;maxLightCharge=100;suctionMul=1;upgrades={};coins=0;hasKey=false;key=null;shopOpen=false;$('#shop').hidden=true;lockExteriorDoor();lockBossGate();announcedGraveyard=false;announcedBoss=false;doorOpen=allDoors.map(()=>0);doorSide=allDoors.map(()=>0);doorHit=allDoors.map(()=>false);graveCaught=0;bossSpawned=false;
+puzzleActive=false;puzzleSolved=false;enteredStreet=false;lockStreetDoor();
+glyphCharge=puzzleGlyphs.map(()=>0);glyphLit=puzzleGlyphs.map(()=>false);
 lockedGhost=null;player={x:810*ROOM_SCALE,y:190*ROOM_SCALE,a:-Math.PI/2,hp:maxHp,hurt:0,slow:0};particles=[];scare=0;time=0;caught=0;active=true;vac=false;running=false;keys={};joy={x:0,y:0};lightOn=false;lightCharge=maxLightCharge;battery=null;tableUsed=false;iceBolt=null;dustCd=0;note=null;
 // One ghost per mansion room (west/center/east) plus one per the first 4 graveyard rooms,
 // matching the flee/melee/ice type order (cycling for the graveyard's 4th). The boss isn't
@@ -97,10 +110,18 @@ function contact(g){const isBoss=g.type==='boss',touching=!g.caught&&g.state!=='
 // One hit per contact, rather than subtracting health on every animation frame.
 if(touching&&!g.touching&&player.hurt<=0){const dmg=isBoss?10:5;player.hp=Math.max(0,player.hp-dmg);player.hurt=.45;scare=isBoss?.5:.35;tone(isBoss?70:95,.15);say(isBoss?'The boss slams into you! −10 HP':'Ghost hit! −5 HP',1.1);ui();if(player.hp===0)finish()}g.touching=touching;
 }
+// A stunned ghost is pinned, not disarmed - it can still lash out while you reel it in, but
+// only weakly: attacks come on a longer cooldown and hit for half. Its footwork and body
+// slam stay shut off. The capture tug-of-war settles around 145 units, well inside a boss's
+// reach, so without that softening a boss capture would be unsurvivable rather than tense.
+const STUN_ATTACK_PENALTY=2.6;
 function redSlash(h,dt){
 if(h.type!=='melee'&&h.type!=='boss')return;
-if(h.caught||h.stun>0)return;
-const isBoss=h.type==='boss',range=isBoss?170:125,windup=isBoss?.55:.73,cooldown=isBoss?1.1:1.9,dmg=isBoss?10:5,trigger=isBoss?190:105;
+if(h.caught)return;
+const isBoss=h.type==='boss',range=isBoss?170:125,windup=isBoss?.55:.73,trigger=isBoss?190:105;
+const pinned=h.stun>0;
+const dmg=pinned?Math.ceil((isBoss?10:5)/2):(isBoss?10:5);
+const cooldown=(isBoss?1.1:1.9)*(pinned?STUN_ATTACK_PENALTY:1);
 h.slashCooldown=Math.max(0,(h.slashCooldown||0)-dt);
 const dx=player.x-h.x,dy=player.y-h.y,d=Math.hypot(dx,dy);
 if((h.slashTime||0)>0){
@@ -110,7 +131,7 @@ if((h.slashTime||0)>0){
     tone(isBoss?110:145,.13);
     if(d<range&&Math.cos(Math.atan2(dy,dx)-h.slashAngle)>Math.cos(1)&&player.hurt<=0){
       player.hp=Math.max(0,player.hp-dmg);player.hurt=.55;scare=isBoss?.3:.16;
-      say(isBoss?'Boss slam! −10 HP. Get clear!':'Claw slash! −5 HP. Keep your distance!',1.3);ui();if(player.hp===0)finish();
+      say((isBoss?'Boss slam! −':'Claw slash! −')+dmg+(pinned?' HP — even pinned it fights back!':isBoss?' HP. Get clear!':' HP. Keep your distance!'),1.3);ui();if(player.hp===0)finish();
     }else say('Slash dodged! Keep reeling it in.',1);
   }
 }else if(d<trigger&&h.slashCooldown===0){
@@ -136,14 +157,40 @@ if(battery){battery.age+=dt;if(battery.age>.35&&player.hp<maxHp&&Math.hypot(play
 for(const c of coinPickups){if(!c.taken&&Math.hypot(player.x-c.x,player.y-c.y)<38){c.taken=true;coins+=c.v;burst(c.x,c.y,c.kind==='silver'?'#d8e0e6':'#ffd35c',16);tone(820,.12);say('+'+c.v+' coins',1.3);ui()}}
 if(!announcedGraveyard&&roomAt(player.x,player.y).name.startsWith('grave')){announcedGraveyard=true;say('A graveyard beyond the mansion... treasure glints among the headstones.',3.5)}
 if(!announcedBoss&&!bossSpawned&&bossGate&&Math.hypot(player.x-bossGate.x,player.y-bossGate.y)<170){announcedBoss=true;say('The far gate is sealed shut. Something bigger sleeps beyond — capture all 4 graveyard ghosts.',3.8)}
-// Doors bang open on actual contact, swinging away from whichever side the robot bumped
-// from (so the same door can swing either way), and ease shut once it backs off - a
-// reusable startle, not a one-shot animation.
+// Doors are shouldered open by the robot rather than snapping to a fixed angle: how far
+// they swing tracks how far into the doorway it has pushed, so the panel follows it through
+// and eases shut behind it. The side is latched on first contact and held for the whole
+// pass, so walking through doesn't flip the door back across your path halfway.
 allDoors.forEach((d,i)=>{
-const dy=(d.range[0]+d.range[1])/2,dist=Math.hypot(player.x-d.x,player.y-dy);
-if(doorOpen[i]===0&&dist<55){doorOpen[i]=player.x<d.x?1:-1;burst(d.x,dy,'#6b5a42',14);tone(82,.32);scare=Math.max(scare,.22)}
-else if(doorOpen[i]!==0&&dist>150)doorOpen[i]=0;
+const dy=(d.range[0]+d.range[1])/2,offX=player.x-d.x,offY=player.y-dy;
+const halfSpan=(d.range[1]-d.range[0])/2+34;
+const push=Math.abs(offY)<halfSpan?clamp(1-Math.abs(offX)/DOOR_REACH,0,1):0;
+if(push<=0){doorSide[i]=0;doorHit[i]=false}
+else if(doorSide[i]===0)doorSide[i]=offX<0?1:-1; // swing away from the side it was met on
+if(push>.34&&!doorHit[i]){doorHit[i]=true;burst(d.x,dy,'#6b5a42',14);tone(82,.32);scare=Math.max(scare,.22)}
+doorOpen[i]=doorSide[i]*push;
 });
+// Sigil puzzle: each one charges while the flashlight beam is on it and bleeds away when it
+// isn't. Hold all four lit at the same time to open the door out to the street.
+if(puzzleActive&&!puzzleSolved){
+let allLit=true;
+puzzleGlyphs.forEach((p,i)=>{
+if(lightOn&&inBeam(p,300,.5))glyphCharge[i]=Math.min(1,glyphCharge[i]+dt/GLYPH_CHARGE);
+else glyphCharge[i]=Math.max(0,glyphCharge[i]-dt/GLYPH_DECAY);
+if(glyphCharge[i]>=1&&!glyphLit[i]){glyphLit[i]=true;burst(p.x,p.y,'#9fe4ff',18);tone(680+i*60,.2);ui()}
+else if(glyphCharge[i]<=0&&glyphLit[i]){glyphLit[i]=false;tone(200,.15);ui()}
+if(!glyphLit[i])allLit=false;
+});
+if(allLit){
+puzzleSolved=true;unlockStreetDoor();
+puzzleGlyphs.forEach(p=>burst(p.x,p.y,'#bfefff',26));
+if(streetGate)burst(streetGate.x,streetGate.y,'#ffe9a8',30);
+tone(900,.5);scare=Math.max(scare,.25);
+say('All four sigils hold! The far door grinds open — daylight, and a street beyond.',4.5);ui();
+}
+}
+// Stepping out into the street is the way out of the manor, and the end of the run.
+if(puzzleSolved&&!enteredStreet&&roomAt(player.x,player.y).name==='street'){enteredStreet=true;finishVictory()}
 if(key&&!hasKey&&Math.hypot(player.x-key.x,player.y-key.y)<42){hasKey=true;const kx=key.x,ky=key.y;key=null;unlockExteriorDoor();burst(kx,ky,'#ffe9a8',26);tone(760,.3);say('Key acquired! The exterior door has unlocked — head east to the yard.',3.5);ui()}
 updateShop(hasKey&&Math.hypot(player.x-shopSpot.x,player.y-shopSpot.y)<150);
 if(iceBolt){iceBolt.x+=iceBolt.vx*dt;iceBolt.y+=iceBolt.vy*dt;iceBolt.life-=dt;if(Math.hypot(iceBolt.x-player.x,iceBolt.y-player.y)<40){player.slow=2.2;burst(iceBolt.x,iceBolt.y,'#bdeeff',18);tone(300,.25);say('Frozen! Moving slower for a moment.',1.5);iceBolt=null}else if(iceBolt.life<=0)iceBolt=null}
@@ -193,7 +240,10 @@ if(caught===3){note={x:g.x,y:g.y};key={x:g.x+26,y:g.y};burst(g.x,g.y,'#f5e4b8',2
 graveCaught++;say('Ghost bottled! ('+graveCaught+'/4 graveyard ghosts)',2.4);ui();
 if(graveCaught===4){unlockBossGate();burst(bossGate.x,bossGate.y,'#c23f3f',30);tone(60,.5);say('The gate shudders and swings open — the boss awaits!',4);spawnBoss()}
 }else if(g.zone==='boss'){
-burst(g.x,g.y,'#c23f3f',60);tone(60,.6);finishVictory();
+// Bottling the boss no longer ends the run - it arms the sigil puzzle that opens the way out.
+burst(g.x,g.y,'#c23f3f',60);tone(60,.6);
+puzzleActive=true;
+say('The boss is bottled — four sigils flare up around the room. Light them all at once.',4.5);ui();
 }
 }}
 for(const h of ghosts){if(h.caught)continue;
@@ -217,21 +267,30 @@ if(lit&&(h.stunImmuneCd||0)<=0){if(h.stun<=0){burst(h.x,h.y,h.color,6);tone(500,
 h.reveal=Math.min(1,h.reveal+dt/.4);
 redSlash(h,dt);if(!active)return;
 if((h.slashTime||0)>0)continue;
-contact(h);if(!active)return;if(h.stun>0)continue;
-const dx=player.x-h.x,dy=player.y-h.y,d=Math.hypot(dx,dy)||1;h.attackTime-=dt;
+contact(h);if(!active)return;
+const dx=player.x-h.x,dy=player.y-h.y,d=Math.hypot(dx,dy)||1;
+// Ranged fire happens before the stun gate: a pinned ice ghost (or boss) keeps shooting
+// while you vacuum it, just on a longer cooldown.
+if(h.type==='ice'||h.type==='boss'){
+const boss=h.type==='boss';
+h.fireCd-=dt;
+if(!iceBolt&&h.fireCd<=0&&d<(boss?700:650)){
+iceBolt={x:h.x,y:h.y,vx:dx/d*(boss?300:260),vy:dy/d*(boss?300:260),life:boss?2.4:2.2};
+h.fireCd=(boss?2.1:2.6)*(h.stun>0?STUN_ATTACK_PENALTY:1);tone(boss?480:500,.15);
+}
+}
+// Stunned ghosts are pinned in place - no chase, no lunge, no body slam.
+if(h.stun>0)continue;
+h.attackTime-=dt;
 if(h.type==='flee'){
 if(d<260)ghostMove(h,-dx/d*dt*85,-dy/d*dt*85);
 }else if(h.type==='ice'){
-h.fireCd-=dt;
 if(d>380)ghostMove(h,dx/d*dt*70,dy/d*dt*70);else if(d<260)ghostMove(h,-dx/d*dt*55,-dy/d*dt*55);
-if(!iceBolt&&h.fireCd<=0&&d<650){iceBolt={x:h.x,y:h.y,vx:dx/d*260,vy:dy/d*260,life:2.2};h.fireCd=2.6;tone(500,.15)}
 }else if(h.type==='boss'){
 // A tougher hybrid: closes faster, charges more often, and layers ice bolts on top.
-h.fireCd-=dt;
 if(h.state==='lunge'){ghostMove(h,h.vx*dt,h.vy*dt);h.rush-=dt;if(h.rush<=0){h.state='roam';h.attackTime=.4}}
 else if(d<420&&h.attackTime<=0){h.state='lunge';h.rush=.5;h.vx=dx/d*260;h.vy=dy/d*260;tone(90,.15)}
 else ghostMove(h,dx/d*dt*95,dy/d*dt*95);
-if(!iceBolt&&h.fireCd<=0&&d<700){iceBolt={x:h.x,y:h.y,vx:dx/d*300,vy:dy/d*300,life:2.4};h.fireCd=2.1;tone(480,.15)}
 }else if(h.state==='lunge'){ghostMove(h,h.vx*dt,h.vy*dt);h.rush-=dt;if(h.rush<=0){h.state='roam';h.attackTime=.65}}
 else if(d<390&&h.attackTime<=0){h.state='lunge';h.rush=.6;h.vx=dx/d*200;h.vy=dy/d*200;tone(110,.12)}
 else ghostMove(h,dx/d*dt*72,dy/d*dt*72);
@@ -243,7 +302,7 @@ $('#fill').style.width=current?pct(current)+'%':'0%';$('#label').textContent=lin
 if(noticeTime<=0)$('#message').textContent=linked?(g.hp<(g.maxHpBoss||100)*.3?'Almost in! Keep pulling!':g.pullingBack>.45?'Good brace! You’re reeling it in.':'It’s dragging you! Pull away with the joystick.') :current?.stun>0?'Hold VACUUM — ghosts relocate after 2 seconds without suction.':lightOn?(lightCharge<maxLightCharge*.2?'Battery low! It’ll cut out soon — find a target fast.':'Sweep the light around — it stuns whatever it touches.'):shopOpen?'Welcome! Spend your coins on upgrades.':'Turn the light on to see. It wakes hidden ghosts and stuns awake ones.';
 }
 let world3d;try{world3d=createHaunt(canvas)}catch(error){$('#message').textContent='3D needs WebGL. Try opening this page in Safari or Chrome.';throw error}
-function render(dt){particles=particles.filter(p=>p.life>0);particles.forEach(p=>{p.life-=dt;p.x+=p.vx*dt;p.y+=p.vy*dt});world3d.render({player,ghosts,particles,time,dt,lightOn,lightCharge,maxLightCharge,vac,lockedGhost,scare,battery,tableUsed,iceBolt,note,key,coinPickups,doorOpen})}
+function render(dt){particles=particles.filter(p=>p.life>0);particles.forEach(p=>{p.life-=dt;p.x+=p.vx*dt;p.y+=p.vy*dt});world3d.render({player,ghosts,particles,time,dt,lightOn,lightCharge,maxLightCharge,vac,running,lockedGhost,scare,battery,tableUsed,iceBolt,note,key,coinPickups,doorOpen,glyphCharge,puzzleActive})}
 function frame(t){const dt=Math.min((t-last)/1000||0,.04);last=t;update(dt);render(dt);requestAnimationFrame(frame)}
 let pointer=null;const stick=$('#stick');function stickMove(e){const r=stick.getBoundingClientRect(),x=e.clientX-r.left-r.width/2,y=e.clientY-r.top-r.height/2,d=Math.hypot(x,y),scale=d>38?38/d:1;joy={x:x*scale/38,y:y*scale/38};$('#knob').style.transform=`translate(${x*scale}px,${y*scale}px)`}stick.addEventListener('pointerdown',e=>{e.preventDefault();pointer=e.pointerId;stick.setPointerCapture(pointer);stickMove(e)});stick.addEventListener('pointermove',e=>{if(e.pointerId===pointer)stickMove(e)});function endStick(){pointer=null;joy={x:0,y:0};$('#knob').style.transform=''}stick.addEventListener('pointerup',endStick);stick.addEventListener('pointercancel',endStick);stick.addEventListener('lostpointercapture',endStick);
 $('#flash').addEventListener('pointerdown',e=>{e.preventDefault();toggleLight()});$('#flash').addEventListener('click',e=>{if(e.detail===0)toggleLight()});$('#vacuum').addEventListener('pointerdown',e=>{e.preventDefault();e.currentTarget.setPointerCapture(e.pointerId);vac=true;e.currentTarget.classList.add('active')});function endVac(){vac=false;$('#vacuum').classList.remove('active')}['pointerup','pointercancel','lostpointercapture'].forEach(s=>$('#vacuum').addEventListener(s,endVac));

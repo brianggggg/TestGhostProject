@@ -1,5 +1,5 @@
 import * as THREE from './three.module.js';
-import {WORLD,healthTable,rooms,roomAt,DOOR_GAME,furniture as roomFurniture,yard,shopSpot,doorUnlocked,graveyardRooms,bossRoom,graveyardDoors,graveyardObstacles,bossGate,mansionDoors,bossUnlocked} from './room.js';
+import {WORLD,healthTable,rooms,roomAt,DOOR_GAME,furniture as roomFurniture,yard,shopSpot,doorUnlocked,graveyardRooms,bossRoom,graveyardDoors,graveyardObstacles,bossGate,mansionDoors,bossUnlocked,streetRoom,puzzleGlyphs,streetGate,streetUnlocked} from './room.js';
 export function createHaunt(canvas){
 const renderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:false});renderer.setPixelRatio(Math.min(devicePixelRatio||1,1.7));renderer.setSize(720,720,false);renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.25;
 const scene=new THREE.Scene();scene.background=new THREE.Color('#080c15');scene.fog=new THREE.FogExp2('#080c15',.026);
@@ -124,8 +124,60 @@ const graveStoneMat=mat('#8a93a0',{roughness:.85});
 graveyardObstacles.forEach(r=>{const x=px(r.x+r.w/2),z=px(r.y+r.h/2),g=new THREE.Group();scene.add(g);box(g,x,.32,z,.4,.62,.12,graveStoneMat);ball(g,x,.62,z,.2,graveStoneMat,[1,.55,.6])});
 // The boss room's entrance stays barred until all 4 graveyard ghosts are captured -
 // bossUnlocked is a live ES-module binding, re-read every render() just like doorUnlocked.
+// ---- The street beyond the boss room: the way out. Cobbles instead of dirt, a kerb, lamp
+// posts, and building faces along the back, so stepping through reads as leaving the manor.
+if(streetRoom){
+  const cobble=mat('#3d4149',{roughness:.95}),kerb=mat('#5b6068',{roughness:.9}),
+    facade=mat('#2b2f38',{roughness:.9}),windowLit=mat('#ffdca8',{emissive:'#ffc46a',emissiveIntensity:.9});
+  const sx0=px(streetRoom.x),sx1=px(streetRoom.x+streetRoom.w),sz0=px(streetRoom.y),sz1=px(streetRoom.y+streetRoom.h);
+  const scx=(sx0+sx1)/2,scz=(sz0+sz1)/2,sw=sx1-sx0,sd=sz1-sz0;
+  const st=new THREE.Group();scene.add(st);
+  box(st,scx,-.2,scz,sw+.3,.4,sd+.3,cobble);
+  // Kerbs running along the road, and a painted centre line.
+  box(st,scx,.06,sz0+.9,sw,.12,.22,kerb);box(st,scx,.06,sz1-.9,sw,.12,.22,kerb);
+  for(let cx=sx0+.8;cx<sx1-.6;cx+=1.5)box(st,cx,.01,scz,.7,.02,.09,mat('#8d8f7e',{roughness:1}));
+  // Building fronts along the far side, a few windows lit from within.
+  for(let bx=sx0+.4;bx<sx1-1.2;bx+=2.4){
+    const h=3.4+((bx*7)%10)/10*1.6;
+    box(st,bx+.9,h/2,sz0-.9,1.9,h,1.3,facade);
+    for(let wy=1;wy<h-.7;wy+=1.25)for(const wx of [-.45,.45])
+      if((Math.round(bx*3+wy*5)%3)!==0)box(st,bx+.9+wx,wy,sz0-.26,.42,.5,.06,windowLit);
+  }
+  // Street lamps: the first warm, non-flashlight light the robot has seen all game.
+  for(const lx of [sx0+2.2,scx,sx1-2.2]){
+    const post=new THREE.Group();post.position.set(lx,0,sz1-1.25);st.add(post);
+    box(post,0,1.55,0,.14,3.1,.14,kerb);
+    box(post,0,3.16,.28,.16,.14,.62,kerb);
+    const bulb=ball(post,0,3.02,.55,.19,mat('#fff2cf',{emissive:'#ffd98a',emissiveIntensity:2.2}));
+    post.add(new THREE.PointLight('#ffd08a',3.4,7.5));
+  }
+}
+// The four sigils on the boss room floor. Dark rings until the flashlight charges them; the
+// inner disc brightens with charge and pulses once a sigil is fully lit.
+const glyphRingMat=mat('#2a3340',{roughness:.8});
+const glyphProps=puzzleGlyphs.map(p=>{
+  const g=new THREE.Group();g.position.set(px(p.x),0,px(p.y));scene.add(g);
+  const ring=new THREE.Mesh(new THREE.TorusGeometry(.44,.07,8,28),glyphRingMat);
+  ring.rotation.x=-Math.PI/2;ring.position.y=.05;g.add(ring);
+  const coreMat=new THREE.MeshBasicMaterial({color:'#9fe4ff',transparent:true,opacity:0,depthWrite:false,side:THREE.DoubleSide});
+  const core=new THREE.Mesh(new THREE.CircleGeometry(.38,24),coreMat);
+  core.rotation.x=-Math.PI/2;core.position.y=.035;g.add(core);
+  for(let k=0;k<4;k++){const spoke=new THREE.Mesh(new THREE.BoxGeometry(.06,.02,.30),glyphRingMat);spoke.position.set(Math.cos(k*Math.PI/2)*.6,.045,Math.sin(k*Math.PI/2)*.6);spoke.rotation.y=-k*Math.PI/2;g.add(spoke)}
+  const light=new THREE.PointLight('#9fe4ff',0,3.2);light.position.y=.5;g.add(light);
+  return {group:g,coreMat,light};
+});
 const bossBar=mat('#2e2a24',{roughness:.85}),bossGlow=mat('#8a2f2f',{emissive:'#c23f3f',emissiveIntensity:1.1});
 let bossGateProp=null;
+// The exit door out to the street, barred until the sigils are all lit.
+let streetGateProp=null;
+if(streetGate){
+  const sgx=px(streetGate.x),sgz=px(streetGate.y);
+  streetGateProp=new THREE.Group();scene.add(streetGateProp);
+  box(streetGateProp,sgx,1.5,sgz,.26,3,1.85,bossBar);
+  for(let i=0;i<4;i++)box(streetGateProp,sgx,.45+i*.85,sgz,.3,.1,2,mat('#4a4136',{metalness:.4,roughness:.6}));
+  ball(streetGateProp,sgx,1.5,sgz,.11,mat('#9fe4ff',{emissive:'#5fc8ff',emissiveIntensity:1.3}));
+  streetGateProp.add(new THREE.PointLight('#5fc8ff',1.5,2.6));
+}
 if(bossGate){
   const bgx=px(bossGate.x),bgz=px(bossGate.y);
   bossGateProp=new THREE.Group();scene.add(bossGateProp);
@@ -356,13 +408,30 @@ function drawParticles(sys,list,heightFn){let n=0;for(let k=0;k<list.length&&n<s
 // A small dropped note - appears once the final ghost is captured.
 const noteMat=mat('#e9dcb8',{roughness:.9});const noteProp=new THREE.Group();scene.add(noteProp);box(noteProp,0,0,0,.34,.02,.44,noteMat);box(noteProp,0,.011,0,.22,.002,.02,mat('#8a7350'));box(noteProp,0,.011,-.08,.16,.002,.015,mat('#8a7350'));noteProp.add(new THREE.PointLight('#fff3cf',1.4,1.6));noteProp.visible=false;
 let previous=new THREE.Vector3(),first=true;
-return {render({player,ghosts:states,particles,time,dt=0,lightOn,lightCharge,maxLightCharge=100,vac,lockedGhost,scare,battery,tableUsed,iceBolt,note,key,coinPickups=[],doorOpen=[]}){
+// Damped spring for the run lean: kicking the velocity on the frame run engages gives a
+// sharp rock backwards that overshoots and settles, rather than a flat tilt.
+let runLean=0,runLeanVel=0,wasRunning=false;
+return {render({player,ghosts:states,particles,time,dt=0,lightOn,lightCharge,maxLightCharge=100,vac,running=false,lockedGhost,scare,battery,tableUsed,iceBolt,note,key,coinPickups=[],doorOpen=[],glyphCharge=[],puzzleActive=false}){
 sealDoor.visible=!doorUnlocked;
 if(bossGateProp)bossGateProp.visible=!bossUnlocked;
-// Bang open fast (with a slight overshoot past perpendicular for punch), ease shut slower.
-// doorOpen[i] is signed (-1/0/1) - which side the robot last bumped it from, so it can
-// swing either way, not just one fixed direction.
-allDoorHinges.forEach((hinge,i)=>{const s=doorOpen[i]||0,target=s*2.05,rate=s?16:5;hinge.userData.angle+=(target-hinge.userData.angle)*Math.min(1,dt*rate);hinge.rotation.y=hinge.userData.angle;});
+if(streetGateProp)streetGateProp.visible=!streetUnlocked;
+// Sigils: dim while charging, then a steady pulse once one is fully lit.
+glyphProps.forEach((gp,i)=>{
+const c=glyphCharge[i]||0,lit=c>=1;
+gp.group.visible=puzzleActive;
+if(!puzzleActive)return;
+const pulse=lit?.86+Math.sin(time*4+i)*.14:c*.65;
+gp.coreMat.opacity=pulse;
+gp.light.intensity=lit?2.4+Math.sin(time*4+i)*.6:c*1.2;
+gp.group.rotation.y=time*(lit?.7:.25)+i;
+});
+// doorOpen[i] is a signed, continuous push in [-1,1] - which side the robot met the door on
+// and how far it has shouldered through. Track the push quickly so the panel stays with the
+// robot, then let it fall shut slowly behind it.
+allDoorHinges.forEach((hinge,i)=>{
+const s=doorOpen[i]||0,target=s*2.05,held=hinge.userData.angle;
+const rate=Math.abs(target)>=Math.abs(held)?20:6;
+hinge.userData.angle+=(target-held)*Math.min(1,dt*rate);hinge.rotation.y=hinge.userData.angle;});
 keyProp.visible=!!key;if(key){keyProp.position.set(px(key.x),.35+Math.sin(time*3)*.08,px(key.y));keyProp.rotation.y=time*1.6;}
 coinPickups.forEach((c,i)=>{const m=coinProps[i];if(!m)return;m.visible=!c.taken;if(!c.taken){m.position.set(px(c.x),.3+Math.sin(time*4+i)*.05,px(c.y));m.rotation.y=time*2.2;const silver=c.kind==='silver';m.material.color.copy(silver?silverColor:goldColor);m.material.emissive.copy(silver?silverEmissive:goldEmissive);}});const x=px(player.x),z=px(player.y);robot.position.set(x,0,z);body.rotation.y=Math.PI/2-player.a;if(!first){roller.rotation.x+=(z-previous.z)/.32;roller.rotation.z-=(x-previous.x)/.32}previous.set(x,0,z);first=false;
 robot.visible=player.hurt<=0||Math.floor(time*18)%2===0;marker.visible=!tableUsed;pickup.visible=!!battery;if(battery){pickup.position.set(px(battery.x),.65+Math.sin(time*4)*.1,px(battery.y));pickup.rotation.y=time*1.8;}
@@ -373,8 +442,14 @@ captureNozzle.set(.32,.85,.64);body.localToWorld(captureNozzle);
 const captureTarget=vac&&lockedGhost&&!lockedGhost.caught&&lockedGhost.stun>0&&
   !['warning','hidden'].includes(lockedGhost.state)&&
   Math.hypot(lockedGhost.x-player.x,lockedGhost.y-player.y)<380?lockedGhost:null;
+// Rock back when run engages: an impulse into the spring on the rising edge, settling into
+// a slight held lean while the throttle is down. Combines with the capture lean-back.
+if(running&&!wasRunning)runLeanVel-=3.4;
+wasRunning=running;
+{const stiff=42,damp=8.5,rest=running?-.09:0,step=Math.min(dt,.05);
+runLeanVel+=((rest-runLean)*stiff-runLeanVel*damp)*step;runLean+=runLeanVel*step;}
 // Lean back against the pull while the roller ball keeps turning naturally.
-body.rotation.x=captureTarget?-.13*(captureTarget.tension??0):0;
+body.rotation.x=(captureTarget?-.13*(captureTarget.tension??0):0)+runLean;
 // Ghost rigs: eased visibility, per-archetype idle behaviour, panic faces while being
 // vacuumed, and a short spiral dissolve on capture. The boss runs the same pass at 2.1x.
 states.forEach((g,i)=>{

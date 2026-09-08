@@ -72,9 +72,10 @@ export let bounds={left:0,right:(1710+400)*ROOM_SCALE,top:0,bottom:380*ROOM_SCAL
 const hit=(r,x,y,padding)=>x>r.x-padding&&x<r.x+r.w+padding&&y>r.y-padding&&y<r.y+r.h+padding;
 export function blocked(x,y,padding=22){
   return obstacles.some(r=>hit(r,x,y,padding))||lockSeal.some(r=>hit(r,x,y,padding))||
-    graveyardWalls.some(r=>hit(r,x,y,padding))||graveyardObstacles.some(r=>hit(r,x,y,padding))||bossSeal.some(r=>hit(r,x,y,padding));
+    graveyardWalls.some(r=>hit(r,x,y,padding))||graveyardObstacles.some(r=>hit(r,x,y,padding))||
+    bossSeal.some(r=>hit(r,x,y,padding))||streetSeal.some(r=>hit(r,x,y,padding));
 }
-export function roomAt(x,y){return [...rooms,yard,...graveyardRooms,bossRoom].filter(Boolean).find(r=>x>=r.x&&x<=r.x+r.w&&y>=r.y&&y<=r.y+r.h)||rooms[1]}
+export function roomAt(x,y){return [...rooms,yard,...graveyardRooms,bossRoom,streetRoom].filter(Boolean).find(r=>x>=r.x&&x<=r.x+r.w&&y>=r.y&&y<=r.y+r.h)||rooms[1]}
 export const DOOR_GAME=[DOOR[0]*ROOM_SCALE,DOOR[1]*ROOM_SCALE];
 // The two internal mansion doorways (west<->center, center<->east) - swinging bump-doors,
 // same shape as the graveyard's, at the midpoint of each gap. The exterior mansion<->yard
@@ -94,14 +95,20 @@ export const mansionDoors=[
 // GY_GAP is deliberately thin (a doorway threshold, not a corridor) - each connection gets
 // an actual door panel (scene3d.js) that bangs open as the player approaches, rather than
 // reading as an empty hallway stretch between rooms.
-const GY_COUNT=5,GY_MIN_W=380,GY_MAX_W=560,GY_GAP=24,GY_DOOR_H=110,GY_MARGIN=30,BOSS_W=440;
+const GY_COUNT=5,GY_MIN_W=380,GY_MAX_W=560,GY_GAP=24,GY_DOOR_H=110,GY_MARGIN=30,BOSS_W=440,STREET_W=620;
 export let graveyardRooms=[],bossRoom=null,graveyardCoinSpots=[],graveyardDoors=[],bossGate=null,graveyardObstacles=[],graveyardGhostSpawns=[],bossSpawn=null;
-let graveyardWalls=[],bossSeal=[],bossSealRect=null;
+// The street past the boss room, the sigils inside it, and the door between them.
+export let streetRoom=null,puzzleGlyphs=[],streetGate=null;
+let graveyardWalls=[],bossSeal=[],bossSealRect=null,streetSeal=[],streetSealRect=null;
 // The boss room stays sealed until all 4 graveyard ghosts are captured (see game.js) -
 // unlockBossGate()/lockBossGate() mirror the mansion's exterior-door lock exactly.
 export let bossUnlocked=false;
 export function unlockBossGate(){bossUnlocked=true;bossSeal=[]}
 export function lockBossGate(){bossUnlocked=false;bossSeal=bossSealRect?[bossSealRect]:[]}
+// And the way out to the street opens only once the sigil puzzle is solved.
+export let streetUnlocked=false;
+export function unlockStreetDoor(){streetUnlocked=true;streetSeal=[]}
+export function lockStreetDoor(){streetUnlocked=false;streetSeal=streetSealRect?[streetSealRect]:[]}
 const rand=(a,b)=>a+Math.random()*(b-a),ri=(a,b)=>Math.floor(rand(a,b+1));
 export function generateGraveyard(){
   const rooms_=[],walls_=[],stones_=[],coins_=[],doors_=[];
@@ -112,8 +119,18 @@ export function generateGraveyard(){
     cursorX+=w+GY_GAP;
   }
   const boss={x:cursorX,y:0,w:BOSS_W,h:380,name:'boss'};
+  // The street lies past the boss room, behind a door the sigil puzzle opens - the way out.
+  const street={x:boss.x+boss.w+GY_GAP,y:0,w:STREET_W,h:380,name:'street'};
   const chain=[...rooms_,boss];
   for(const r of chain){walls_.push({x:r.x,y:-WT,w:r.w,h:WT});walls_.push({x:r.x,y:380,w:r.w,h:WT})}
+  // Street: its own north/south walls, a dead-end east boundary, and the flanking walls of
+  // the doorway back into the boss room (the opening itself is sealed until the puzzle is solved).
+  walls_.push({x:street.x,y:-WT,w:street.w+WT,h:WT});
+  walls_.push({x:street.x,y:380,w:street.w+WT,h:WT});
+  walls_.push({x:street.x+street.w,y:-WT,w:WT,h:380+2*WT});
+  const streetGapX=boss.x+boss.w;
+  walls_.push({x:streetGapX,y:-WT,w:GY_GAP,h:DOOR[0]-(-WT)});
+  walls_.push({x:streetGapX,y:DOOR[1],w:GY_GAP,h:(380+WT)-DOOR[1]});
   // The yard/grave1 seam is already opened (fixed DOOR range) in the static wallsBase above.
   doors_.push({x:(1710+400+GY_GAP/2)*ROOM_SCALE,range:[DOOR[0]*ROOM_SCALE,DOOR[1]*ROOM_SCALE],isBoss:false});
   for(let i=1;i<chain.length;i++){
@@ -139,6 +156,7 @@ export function generateGraveyard(){
   const scale=r=>({x:r.x*ROOM_SCALE,y:r.y*ROOM_SCALE,w:r.w*ROOM_SCALE,h:r.h*ROOM_SCALE,name:r.name});
   graveyardRooms=rooms_.map(scale);
   bossRoom=scale(boss);
+  streetRoom=scale(street);
   graveyardWalls=walls_.map(r=>({x:r.x*ROOM_SCALE,y:r.y*ROOM_SCALE,w:r.w*ROOM_SCALE,h:r.h*ROOM_SCALE}));
   graveyardObstacles=stones_.map(r=>({x:r.x*ROOM_SCALE,y:r.y*ROOM_SCALE,w:r.w*ROOM_SCALE,h:r.h*ROOM_SCALE}));
   graveyardCoinSpots=coins_.map(c=>({x:c.x*ROOM_SCALE,y:c.y*ROOM_SCALE,v:c.v,kind:c.kind}));
@@ -151,6 +169,14 @@ export function generateGraveyard(){
   // gate) - all 4 must be captured before the boss gate will open.
   graveyardGhostSpawns=rooms_.slice(0,4).map(r=>({x:(r.x+r.w/2)*ROOM_SCALE,y:(r.y+r.h/2)*ROOM_SCALE}));
   bossSpawn={x:(boss.x+boss.w/2)*ROOM_SCALE,y:(boss.y+boss.h/2)*ROOM_SCALE};
-  bounds={left:0,right:(boss.x+boss.w)*ROOM_SCALE,top:0,bottom:380*ROOM_SCALE};
-  return {rooms:graveyardRooms,bossRoom};
+  // Four sigils in the corners of the boss room - the flashlight puzzle that opens the way
+  // out. They're markings, not obstacles, so they get no collision entry.
+  puzzleGlyphs=[[110,95],[boss.w-110,95],[110,285],[boss.w-110,285]]
+    .map(([ox,oy])=>({x:(boss.x+ox)*ROOM_SCALE,y:oy*ROOM_SCALE}));
+  // The exit door out to the street, sealed until the sigils are all lit at once.
+  streetSealRect={x:streetGapX*ROOM_SCALE,y:DOOR[0]*ROOM_SCALE,w:GY_GAP*ROOM_SCALE,h:(DOOR[1]-DOOR[0])*ROOM_SCALE};
+  streetUnlocked=false;streetSeal=[streetSealRect];
+  streetGate={x:(streetGapX+GY_GAP/2)*ROOM_SCALE,y:((DOOR[0]+DOOR[1])/2)*ROOM_SCALE};
+  bounds={left:0,right:(street.x+street.w)*ROOM_SCALE,top:0,bottom:380*ROOM_SCALE};
+  return {rooms:graveyardRooms,bossRoom,streetRoom};
 }
