@@ -1,5 +1,5 @@
 import * as THREE from './three.module.js';
-import {WORLD,healthTable,rooms,roomAt,DOOR_GAME,furniture as roomFurniture,yard,shopSpot,doorUnlocked,graveyardRooms,bossRoom,graveyardDoors,graveyardObstacles,bossGate} from './room.js';
+import {WORLD,healthTable,rooms,roomAt,DOOR_GAME,furniture as roomFurniture,yard,shopSpot,doorUnlocked,graveyardRooms,bossRoom,graveyardDoors,graveyardObstacles,bossGate,mansionDoors} from './room.js';
 export function createHaunt(canvas){
 const renderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:false});renderer.setPixelRatio(Math.min(devicePixelRatio||1,1.7));renderer.setSize(720,720,false);renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.25;
 const scene=new THREE.Scene();scene.background=new THREE.Color('#080c15');scene.fog=new THREE.FogExp2('#080c15',.026);
@@ -13,6 +13,10 @@ function ball(parent,x,y,z,r,m,s=[1,1,1]){const o=new THREE.Mesh(new THREE.Spher
 // for every entity, so static geometry and collision always agree. West/east can each be a
 // solid wall or an open doorway (matching room.js's wall-gap collision); south stays open
 // (the camera-facing cutaway) and north always gets the back wall + window treatment.
+// west/east: 'solid' (dead-end wall), 'door' (the mansion's locked exterior threshold -
+// unaffected by this change, keeps its own half-wall+sealDoor treatment), or 'skip' (a
+// buildConnection()/graveyard-door call handles this side instead - no wall drawn here,
+// so the two rooms don't each draw a redundant stub with a void between them).
 function buildRoom(rect,west,east){
 const x0=px(rect.x),x1=px(rect.x+rect.w),z0=px(rect.y),z1=px(rect.y+rect.h);
 const cx=(x0+x1)/2,cz=(z0+z1)/2,w=x1-x0,d=z1-z0;
@@ -24,14 +28,27 @@ box(g,cx,.13,z0+.02,w+.2,.16,.2,brass);box(g,cx,3.9,z0,w+.2,.16,.22,brass);
 const windowMat=mat('#7b9abd',{emissive:'#527dae',emissiveIntensity:.65});box(g,cx,2.6,z0-.17,2.4,2.1,.08,black);box(g,cx,2.6,z0-.08,2.1,1.9,.05,windowMat);box(g,cx,2.6,z0+.01,.09,1.9,.1,brass);box(g,cx,2.6,z0+.02,2.1,.09,.1,brass);
 const rugW=Math.max(1,w-1.2),rugD=Math.max(1,d-1.4);box(g,cx,.025,cz+.15,rugW,.025,rugD,mat('#283e3b'));
 const doorZ0=px(DOOR_GAME[0]),doorZ1=px(DOOR_GAME[1]);
-const side=(atX,open)=>{if(open){box(g,atX,1.1,(z0+doorZ0)/2,.25,2.2,doorZ0-z0+.1,darkwood);box(g,atX,1.1,(doorZ1+z1)/2,.25,2.2,z1-doorZ1+.1,darkwood)}else box(g,atX,1.1,cz,.25,2.2,d+.3,darkwood)};
-side(x0-.12,west==='door');side(x1+.12,east==='door');
+const side=(atX,mode)=>{if(mode==='skip')return;if(mode==='door'){box(g,atX,1.1,(z0+doorZ0)/2,.25,2.2,doorZ0-z0+.1,darkwood);box(g,atX,1.1,(doorZ1+z1)/2,.25,2.2,z1-doorZ1+.1,darkwood)}else box(g,atX,1.1,cz,.25,2.2,d+.3,darkwood)};
+side(x0-.12,west);side(x1+.12,east);
 return g;
 }
-buildRoom(rooms[0],'solid','door');
-buildRoom(rooms[1],'door','door');
-buildRoom(rooms[2],'door','door');
-buildRoom(yard,'door','solid');
+buildRoom(rooms[0],'solid','skip');
+buildRoom(rooms[1],'skip','skip');
+buildRoom(rooms[2],'skip','door');
+buildRoom(yard,'door','skip');
+// The mansion's two internal doorways (west<->center, center<->east): one continuous
+// floor+wall spanning the whole gap between the rooms (rather than each room drawing its
+// own stub with open air between them), with the door itself set into it - no more empty
+// hallway between adjoining rooms, matching the graveyard's tightened thresholds.
+function buildConnection(roomA,roomB,range){
+const ax1=px(roomA.x+roomA.w),bx0=px(roomB.x),z0=px(roomA.y),z1=px(roomA.y+roomA.h);
+const cx=(ax1+bx0)/2,gapW=bx0-ax1,rz0=px(range[0]),rz1=px(range[1]);
+box(scene,cx,-.2,(z0+z1)/2,gapW+.1,.4,z1-z0+.3,timber);
+box(scene,cx,1.1,(z0+rz0)/2,gapW,2.2,rz0-z0+.1,darkwood);
+box(scene,cx,1.1,(rz1+z1)/2,gapW,2.2,z1-rz1+.1,darkwood);
+}
+buildConnection(rooms[0],rooms[1],DOOR_GAME);
+buildConnection(rooms[1],rooms[2],DOOR_GAME);
 // The exterior doorway (room 2 <-> yard) starts sealed behind a barred door until the
 // mansion key is found - doorUnlocked is a live ES-module binding, re-read every render().
 const exteriorX=px(rooms[2].x+rooms[2].w),exDoorZ0=px(DOOR_GAME[0]),exDoorZ1=px(DOOR_GAME[1]);
@@ -82,20 +99,25 @@ function buildGraveRoom(rect,westRange,eastRange){
 }
 const graveChain=[...graveyardRooms,bossRoom];
 graveChain.forEach((r,i)=>buildGraveRoom(r,graveyardDoors[i]?graveyardDoors[i].range:null,graveyardDoors[i+1]?graveyardDoors[i+1].range:null));
-// A real door at every graveyard threshold (yard->grave1 through grave4->grave5) instead of
-// an empty gap - closed, it fills the doorway flush; game.js's doorOpen[] (proximity-driven)
-// swings it open with a bang as the robot approaches, and shut again once it moves off. The
-// boss doorway is excluded - that one stays behind the permanent barred gate above/below.
+// A real door at every mansion and graveyard threshold (except the boss doorway, which
+// keeps its permanent barred gate, and the mansion's locked exterior door, its own separate
+// lock mechanic) instead of an empty gap - closed, it fills the doorway flush; game.js's
+// doorOpen[] (contact-triggered, signed by which side the robot bumped it from) swings it
+// open with a bang either way, and shuts it again once the robot backs off. This array's
+// order must match game.js's allDoors exactly: mansion doorways first, then graveyard.
 const doorPanelMat=mat('#2c2118',{roughness:.85}),doorBandMat=mat('#4a4136',{metalness:.4,roughness:.6});
-const graveDoors=graveyardDoors.map(d=>{
-  if(d.isBoss)return null;
-  const dz0=px(d.range[0]),dz1=px(d.range[1]),dx=px(d.x),len=dz1-dz0;
+function buildDoorPanel(dx,dz0,dz1){
+  const len=dz1-dz0;
   const hinge=new THREE.Group();hinge.position.set(dx,1.5,dz0);hinge.userData.angle=0;scene.add(hinge);
   box(hinge,0,0,len/2,.22,3,len,doorPanelMat);
   box(hinge,.13,.4,len/2,.05,.1,len-.14,doorBandMat);box(hinge,.13,-.4,len/2,.05,.1,len-.14,doorBandMat);
   ball(hinge,.15,0,len-.22,.06,doorBandMat);
   return hinge;
-});
+}
+const allDoorHinges=[
+  ...mansionDoors.map(d=>buildDoorPanel(px(d.x),px(d.range[0]),px(d.range[1]))),
+  ...graveyardDoors.filter(d=>!d.isBoss).map(d=>buildDoorPanel(px(d.x),px(d.range[0]),px(d.range[1]))),
+];
 // Gravestones scattered through the graveyard rooms - simple obstacle props, same pattern
 // as the mansion furniture below.
 const graveStoneMat=mat('#8a93a0',{roughness:.85});
@@ -137,7 +159,9 @@ let previous=new THREE.Vector3(),first=true;
 return {render({player,ghosts:states,particles,time,dt=0,lightOn,lightCharge,maxLightCharge=100,vac,lockedGhost,scare,battery,tableUsed,iceBolt,note,key,coinPickups=[],doorOpen=[]}){
 sealDoor.visible=!doorUnlocked;
 // Bang open fast (with a slight overshoot past perpendicular for punch), ease shut slower.
-graveDoors.forEach((hinge,i)=>{if(!hinge)return;const target=doorOpen[i]?-2.05:0;const rate=doorOpen[i]?16:5;hinge.userData.angle+=(target-hinge.userData.angle)*Math.min(1,dt*rate);hinge.rotation.y=hinge.userData.angle;});
+// doorOpen[i] is signed (-1/0/1) - which side the robot last bumped it from, so it can
+// swing either way, not just one fixed direction.
+allDoorHinges.forEach((hinge,i)=>{const s=doorOpen[i]||0,target=s*2.05,rate=s?16:5;hinge.userData.angle+=(target-hinge.userData.angle)*Math.min(1,dt*rate);hinge.rotation.y=hinge.userData.angle;});
 keyProp.visible=!!key;if(key){keyProp.position.set(px(key.x),.35+Math.sin(time*3)*.08,px(key.y));keyProp.rotation.y=time*1.6;}
 coinPickups.forEach((c,i)=>{const m=coinProps[i];if(!m)return;m.visible=!c.taken;if(!c.taken){m.position.set(px(c.x),.3+Math.sin(time*4+i)*.05,px(c.y));m.rotation.y=time*2.2;const silver=c.kind==='silver';m.material.color.copy(silver?silverColor:goldColor);m.material.emissive.copy(silver?silverEmissive:goldEmissive);}});const x=px(player.x),z=px(player.y);robot.position.set(x,0,z);body.rotation.y=Math.PI/2-player.a;if(!first){roller.rotation.x+=(z-previous.z)/.32;roller.rotation.z-=(x-previous.x)/.32}previous.set(x,0,z);first=false;
 robot.visible=player.hurt<=0||Math.floor(time*18)%2===0;marker.visible=!tableUsed;pickup.visible=!!battery;if(battery){pickup.position.set(px(battery.x),.65+Math.sin(time*4)*.1,px(battery.y));pickup.rotation.y=time*1.8;}

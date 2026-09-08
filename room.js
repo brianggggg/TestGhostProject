@@ -76,6 +76,14 @@ export function blocked(x,y,padding=22){
 }
 export function roomAt(x,y){return [...rooms,yard,...graveyardRooms,bossRoom].filter(Boolean).find(r=>x>=r.x&&x<=r.x+r.w&&y>=r.y&&y<=r.y+r.h)||rooms[1]}
 export const DOOR_GAME=[DOOR[0]*ROOM_SCALE,DOOR[1]*ROOM_SCALE];
+// The two internal mansion doorways (west<->center, center<->east) - swinging bump-doors,
+// same shape as the graveyard's, at the midpoint of each gap. The exterior mansion<->yard
+// threshold is deliberately excluded here: that one is a locked/unlocked door, not a
+// bump-open one, and keeps its own sealDoor treatment in scene3d.js.
+export const mansionDoors=[
+  {x:((roomsBase[0].x+roomsBase[0].w+roomsBase[1].x)/2)*ROOM_SCALE,range:DOOR_GAME},
+  {x:((roomsBase[1].x+roomsBase[1].w+roomsBase[2].x)/2)*ROOM_SCALE,range:DOOR_GAME},
+];
 
 // ---- Procedural graveyard, past the yard - regenerated fresh each game via generateGraveyard().
 // Continues the same row/doorway/blocked() model as the mansion (rooms in a shared y band,

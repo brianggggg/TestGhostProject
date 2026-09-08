@@ -1,15 +1,19 @@
 import {createHaunt} from './scene3d.js';
-import {ROOM_SCALE,WORLD,healthTable,bounds,blocked,shopSpot,unlockExteriorDoor,lockExteriorDoor,roomAt,generateGraveyard,graveyardCoinSpots,graveyardDoors,bossGate} from './room.js';
+import {ROOM_SCALE,WORLD,healthTable,bounds,blocked,shopSpot,unlockExteriorDoor,lockExteriorDoor,roomAt,generateGraveyard,graveyardCoinSpots,graveyardDoors,mansionDoors,bossGate} from './room.js';
 const canvas=document.querySelector('#game'),$=s=>document.querySelector(s);
 // Generated once at load (not per-restart) so scene3d's static procedural geometry, built
 // once in createHaunt() below, always matches room.js's layout/collision.
 generateGraveyard();
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v)),colors=['#a6f5cd','#ff6a5a','#ffcf92'],types=['flee','melee','ice'];
 let player,ghosts,particles,time=0,last=0,lightOn=false,lightCharge=100,maxLightCharge=100,vac=false,keys={},joy={x:0,y:0},caught=0,active=true,sound=false,ac,noticeTime=0,lockedGhost=null,scare=0,battery=null,tableUsed=false,iceBolt=null,dustCd=0,note=null,maxHp=100,coins=0,hasKey=false,key=null,coinPickups=[],shopOpen=false,upgrades={},announcedGraveyard=false,announcedBoss=false;
-// One entry per graveyard doorway (yard->grave1 through grave5->boss, boss excluded below) -
-// whether that door is currently banged open. scene3d.js only handles the swing animation;
-// this is the actual game-state toggle, driven purely by player proximity.
-let doorOpen=graveyardDoors.map(()=>false);
+// Every bump-open door in the game - the mansion's 2 internal doorways plus every graveyard
+// threshold (yard->grave1 through grave4->grave5; the boss doorway keeps its separate
+// permanent barred gate, and the mansion's locked exterior door is its own lock mechanic -
+// neither belongs here). scene3d.js builds its door props in this exact same order.
+const allDoors=[...mansionDoors,...graveyardDoors.filter(d=>!d.isBoss)];
+// Signed per-door state: 0 closed, +1/-1 open and swung to that side - whichever side the
+// robot last bumped it from, so the same door can bang open either way.
+let doorOpen=allDoors.map(()=>0);
 // One-time shop upgrades, bought with coins found around the mansion.
 const UPGRADES=[
 {id:'battery',label:'Battery Pack',desc:'+30 max flashlight charge',cost:20,apply:()=>{maxLightCharge+=30;lightCharge=Math.min(maxLightCharge,lightCharge+30)}},
@@ -38,7 +42,7 @@ syncLight();
 }
 function finish(){active=false;lockedGhost=null;release();$('#win small').textContent='POWER DEPLETED';$('#win h2').textContent='Robot offline.';$('#win p').textContent='The ghosts got you. Restart with '+maxHp+' HP and a fresh battery.';$('#again').textContent='Try again';$('#win').hidden=false}
 function reset(){
-maxHp=100;maxLightCharge=100;suctionMul=1;upgrades={};coins=0;hasKey=false;key=null;shopOpen=false;$('#shop').hidden=true;lockExteriorDoor();announcedGraveyard=false;announcedBoss=false;doorOpen=graveyardDoors.map(()=>false);
+maxHp=100;maxLightCharge=100;suctionMul=1;upgrades={};coins=0;hasKey=false;key=null;shopOpen=false;$('#shop').hidden=true;lockExteriorDoor();announcedGraveyard=false;announcedBoss=false;doorOpen=allDoors.map(()=>0);
 lockedGhost=null;player={x:810*ROOM_SCALE,y:190*ROOM_SCALE,a:-Math.PI/2,hp:maxHp,hurt:0,slow:0};particles=[];scare=0;time=0;caught=0;active=true;vac=false;keys={};joy={x:0,y:0};lightOn=false;lightCharge=maxLightCharge;battery=null;tableUsed=false;iceBolt=null;dustCd=0;note=null;
 // One ghost per mansion room (west/center/east), matching the flee/melee/ice type order.
 ghosts=colors.map((color,i)=>({x:[350,650,1450][i]*ROOM_SCALE,y:[280,280,280][i]*ROOM_SCALE,state:'warning',color,type:types[i],hp:100,stun:0,caught:false,seed:i*2.3,noSuction:0,touching:false,attackTime:0,locked:false,reveal:0,fireCd:1.2,struggleCd:.9}));
@@ -114,13 +118,13 @@ if(battery){battery.age+=dt;if(battery.age>.35&&player.hp<maxHp&&Math.hypot(play
 for(const c of coinPickups){if(!c.taken&&Math.hypot(player.x-c.x,player.y-c.y)<38){c.taken=true;coins+=c.v;burst(c.x,c.y,c.kind==='silver'?'#d8e0e6':'#ffd35c',16);tone(820,.12);say('+'+c.v+' coins',1.3);ui()}}
 if(!announcedGraveyard&&roomAt(player.x,player.y).name.startsWith('grave')){announcedGraveyard=true;say('A graveyard beyond the mansion... treasure glints among the headstones.',3.5)}
 if(!announcedBoss&&bossGate&&Math.hypot(player.x-bossGate.x,player.y-bossGate.y)<170){announcedBoss=true;say('The far gate is sealed shut. Something bigger sleeps beyond — not yet.',3.5)}
-// Graveyard doors bang open as the robot approaches and swing shut again once it moves off -
-// a startle each time, not a one-shot. The boss gate stays out of this (it never opens).
-graveyardDoors.forEach((d,i)=>{
-if(d.isBoss)return;
+// Doors bang open on actual contact, swinging away from whichever side the robot bumped
+// from (so the same door can swing either way), and ease shut once it backs off - a
+// reusable startle, not a one-shot animation.
+allDoors.forEach((d,i)=>{
 const dy=(d.range[0]+d.range[1])/2,dist=Math.hypot(player.x-d.x,player.y-dy);
-if(!doorOpen[i]&&dist<150){doorOpen[i]=true;burst(d.x,dy,'#6b5a42',14);tone(82,.32);scare=Math.max(scare,.22)}
-else if(doorOpen[i]&&dist>260)doorOpen[i]=false;
+if(doorOpen[i]===0&&dist<55){doorOpen[i]=player.x<d.x?1:-1;burst(d.x,dy,'#6b5a42',14);tone(82,.32);scare=Math.max(scare,.22)}
+else if(doorOpen[i]!==0&&dist>150)doorOpen[i]=0;
 });
 if(key&&!hasKey&&Math.hypot(player.x-key.x,player.y-key.y)<42){hasKey=true;const kx=key.x,ky=key.y;key=null;unlockExteriorDoor();burst(kx,ky,'#ffe9a8',26);tone(760,.3);say('Key acquired! The exterior door has unlocked — head east to the yard.',3.5);ui()}
 updateShop(hasKey&&Math.hypot(player.x-shopSpot.x,player.y-shopSpot.y)<150);
