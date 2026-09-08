@@ -1,11 +1,14 @@
 import {createHaunt} from './scene3d.js';
-import {ROOM_SCALE,WORLD,healthTable,bounds,blocked,shopSpot,unlockExteriorDoor,lockExteriorDoor,roomAt,generateGraveyard,graveyardCoinSpots,graveyardDoors,mansionDoors,bossGate} from './room.js';
+import {ROOM_SCALE,WORLD,healthTable,bounds,blocked,shopSpot,unlockExteriorDoor,lockExteriorDoor,roomAt,generateGraveyard,graveyardCoinSpots,graveyardDoors,mansionDoors,bossGate,graveyardGhostSpawns,bossSpawn,unlockBossGate,lockBossGate} from './room.js';
 const canvas=document.querySelector('#game'),$=s=>document.querySelector(s);
 // Generated once at load (not per-restart) so scene3d's static procedural geometry, built
 // once in createHaunt() below, always matches room.js's layout/collision.
 generateGraveyard();
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v)),colors=['#a6f5cd','#ff6a5a','#ffcf92'],types=['flee','melee','ice'];
-let player,ghosts,particles,time=0,last=0,lightOn=false,lightCharge=100,maxLightCharge=100,vac=false,keys={},joy={x:0,y:0},caught=0,active=true,sound=false,ac,noticeTime=0,lockedGhost=null,scare=0,battery=null,tableUsed=false,iceBolt=null,dustCd=0,note=null,maxHp=100,coins=0,hasKey=false,key=null,coinPickups=[],shopOpen=false,upgrades={},announcedGraveyard=false,announcedBoss=false;
+// The 4 graveyard ghosts get their own palette, distinct from the mansion's 3 - scene3d.js
+// mirrors this exact array so visuals line up 1:1 with the ghosts array's zone ordering.
+const graveColors=['#c9a6f5','#8fffb0','#7fd4ff','#e8dcc0'];
+let player,ghosts,particles,time=0,last=0,lightOn=false,lightCharge=100,maxLightCharge=100,vac=false,running=false,keys={},joy={x:0,y:0},caught=0,graveCaught=0,bossSpawned=false,active=true,sound=false,ac,noticeTime=0,lockedGhost=null,scare=0,battery=null,tableUsed=false,iceBolt=null,dustCd=0,note=null,maxHp=100,coins=0,hasKey=false,key=null,coinPickups=[],shopOpen=false,upgrades={},announcedGraveyard=false,announcedBoss=false;
 // Every bump-open door in the game - the mansion's 2 internal doorways plus every graveyard
 // threshold (yard->grave1 through grave4->grave5; the boss doorway keeps its separate
 // permanent barred gate, and the mansion's locked exterior door is its own lock mechanic -
@@ -35,17 +38,29 @@ UPGRADES.forEach(u=>{const btn=$('#buy-'+u.id);const owned=!!upgrades[u.id];btn.
 function buyUpgrade(id){const u=UPGRADES.find(u=>u.id===id);if(!u||upgrades[u.id]||coins<u.cost)return;coins-=u.cost;upgrades[u.id]=true;u.apply();tone(760,.25);say(u.label+' installed!',2);ui();updateShop(true)}
 function ui(){
 $('#count').textContent='●'.repeat(caught)+'○'.repeat(3-caught)+'   '+caught+' / 3 captured';
+$('#boss-count').hidden=!(announcedGraveyard||graveCaught>0);
+$('#boss-count').textContent='👻 '+graveCaught+' / 4';
 $('#health-text').textContent=player.hp+' / '+maxHp+' HP';$('#health-fill').style.width=(player.hp/maxHp*100)+'%';$('#health').setAttribute('aria-valuemax',maxHp);$('#health').setAttribute('aria-valuenow',player.hp);$('#health').classList.toggle('low',player.hp<=maxHp*.25);
 $('#battery-status').textContent=tableUsed?(battery?'Battery ready · +50 HP':'Battery used'):'Bump the green-marked table · +50 HP';
 $('#coins-text').textContent=(hasKey?'🔑 ':'')+'🪙 '+coins;
 syncLight();
 }
 function finish(){active=false;lockedGhost=null;release();$('#win small').textContent='POWER DEPLETED';$('#win h2').textContent='Robot offline.';$('#win p').textContent='The ghosts got you. Restart with '+maxHp+' HP and a fresh battery.';$('#again').textContent='Try again';$('#win').hidden=false}
+function finishVictory(){active=false;lockedGhost=null;release();$('#win small').textContent='BOSS DEFEATED';$('#win h2').textContent='The manor is finally free.';$('#win p').textContent='You bottled the boss with '+player.hp+' HP to spare. Well fought.';$('#again').textContent='Play again';$('#win').hidden=false}
+function spawnBoss(){
+if(bossSpawned)return;bossSpawned=true;
+ghosts.push({x:bossSpawn.x,y:bossSpawn.y,state:'roam',color:'#c23f3f',type:'boss',zone:'boss',hp:480,maxHpBoss:480,phase:0,stunImmuneCd:0,stun:0,caught:false,seed:19,noSuction:0,touching:false,attackTime:0,locked:false,reveal:1,fireCd:1.6,struggleCd:.9});
+}
 function reset(){
-maxHp=100;maxLightCharge=100;suctionMul=1;upgrades={};coins=0;hasKey=false;key=null;shopOpen=false;$('#shop').hidden=true;lockExteriorDoor();announcedGraveyard=false;announcedBoss=false;doorOpen=allDoors.map(()=>0);
-lockedGhost=null;player={x:810*ROOM_SCALE,y:190*ROOM_SCALE,a:-Math.PI/2,hp:maxHp,hurt:0,slow:0};particles=[];scare=0;time=0;caught=0;active=true;vac=false;keys={};joy={x:0,y:0};lightOn=false;lightCharge=maxLightCharge;battery=null;tableUsed=false;iceBolt=null;dustCd=0;note=null;
-// One ghost per mansion room (west/center/east), matching the flee/melee/ice type order.
-ghosts=colors.map((color,i)=>({x:[350,650,1450][i]*ROOM_SCALE,y:[280,280,280][i]*ROOM_SCALE,state:'warning',color,type:types[i],hp:100,stun:0,caught:false,seed:i*2.3,noSuction:0,touching:false,attackTime:0,locked:false,reveal:0,fireCd:1.2,struggleCd:.9}));
+maxHp=100;maxLightCharge=100;suctionMul=1;upgrades={};coins=0;hasKey=false;key=null;shopOpen=false;$('#shop').hidden=true;lockExteriorDoor();lockBossGate();announcedGraveyard=false;announcedBoss=false;doorOpen=allDoors.map(()=>0);graveCaught=0;bossSpawned=false;
+lockedGhost=null;player={x:810*ROOM_SCALE,y:190*ROOM_SCALE,a:-Math.PI/2,hp:maxHp,hurt:0,slow:0};particles=[];scare=0;time=0;caught=0;active=true;vac=false;running=false;keys={};joy={x:0,y:0};lightOn=false;lightCharge=maxLightCharge;battery=null;tableUsed=false;iceBolt=null;dustCd=0;note=null;
+// One ghost per mansion room (west/center/east) plus one per the first 4 graveyard rooms,
+// matching the flee/melee/ice type order (cycling for the graveyard's 4th). The boss isn't
+// here - spawnBoss() pushes it in once all 4 graveyard ghosts are captured.
+ghosts=[
+  ...colors.map((color,i)=>({x:[350,650,1450][i]*ROOM_SCALE,y:[280,280,280][i]*ROOM_SCALE,state:'warning',color,type:types[i],zone:'mansion',hp:100,stun:0,caught:false,seed:i*2.3,noSuction:0,touching:false,attackTime:0,locked:false,reveal:0,fireCd:1.2,struggleCd:.9})),
+  ...graveyardGhostSpawns.map((p,i)=>({x:p.x,y:p.y,state:'warning',color:graveColors[i],type:types[i%3],zone:'graveyard',hp:100,stun:0,caught:false,seed:(i+3)*2.3,noSuction:0,touching:false,attackTime:0,locked:false,reveal:0,fireCd:1.2,struggleCd:.9})),
+];
 // Three fixed coin pickups in the mansion, plus the procedural graveyard's gold/silver
 // treasure (generated once at load - see generateGraveyard() below - so its layout matches
 // what scene3d already built; only the taken/collected state resets here).
@@ -78,27 +93,29 @@ for(let i=0;i<80;i++){let x,y;if(i<50&&Math.random()<.7){const a=Math.random()*M
 if(!point){for(let x=bounds.left+50;x<bounds.right&&!point;x+=95)for(let y=bounds.top+50;y<bounds.bottom;y+=95)if(!blocked(x,y,40)&&Math.hypot(x-player.x,y-player.y)>175&&Math.hypot(x-old.x,y-old.y)>200){point={x,y};break}}
 if(!point)return;burst(g.x,g.y,g.color,15);if(lockedGhost===g)lockedGhost=null;Object.assign(g,point,{hp:100,stun:0,state:'warning',noSuction:0,touching:false,attackTime:0,locked:false,reveal:0,fireCd:1.2,struggleCd:.9,slashTime:0,slashCooldown:0,slashAngle:0});burst(g.x,g.y,g.color,15);
 }
-function contact(g){const touching=!g.caught&&g.state!=='warning'&&g.stun<=0&&Math.hypot(g.x-player.x,g.y-player.y)<45;
+function contact(g){const isBoss=g.type==='boss',touching=!g.caught&&g.state!=='warning'&&g.stun<=0&&Math.hypot(g.x-player.x,g.y-player.y)<(isBoss?70:45);
 // One hit per contact, rather than subtracting health on every animation frame.
-if(touching&&!g.touching&&player.hurt<=0){player.hp=Math.max(0,player.hp-5);player.hurt=.45;scare=.35;tone(95,.15);say('Ghost hit! −5 HP',1.1);ui();if(player.hp===0)finish()}g.touching=touching;
+if(touching&&!g.touching&&player.hurt<=0){const dmg=isBoss?10:5;player.hp=Math.max(0,player.hp-dmg);player.hurt=.45;scare=isBoss?.5:.35;tone(isBoss?70:95,.15);say(isBoss?'The boss slams into you! −10 HP':'Ghost hit! −5 HP',1.1);ui();if(player.hp===0)finish()}g.touching=touching;
 }
 function redSlash(h,dt){
-if(h.type!=='melee'||h.caught||h.stun>0)return;
+if(h.type!=='melee'&&h.type!=='boss')return;
+if(h.caught||h.stun>0)return;
+const isBoss=h.type==='boss',range=isBoss?170:125,windup=isBoss?.55:.73,cooldown=isBoss?1.1:1.9,dmg=isBoss?10:5,trigger=isBoss?190:105;
 h.slashCooldown=Math.max(0,(h.slashCooldown||0)-dt);
 const dx=player.x-h.x,dy=player.y-h.y,d=Math.hypot(dx,dy);
 if((h.slashTime||0)>0){
-  const before=h.slashTime;h.slashTime=Math.max(0,h.slashTime-dt);
+  const before=h.slashTime,commitAt=windup*.4;h.slashTime=Math.max(0,h.slashTime-dt);
   // Direction is committed during the wind-up: sidestepping can evade it.
-  if(before>.28&&h.slashTime<=.28){
-    tone(145,.13);
-    if(d<125&&Math.cos(Math.atan2(dy,dx)-h.slashAngle)>Math.cos(1)&&player.hurt<=0){
-      player.hp=Math.max(0,player.hp-5);player.hurt=.55;scare=.16;
-      say('Claw slash! −5 HP. Keep your distance!',1.3);ui();if(player.hp===0)finish();
+  if(before>commitAt&&h.slashTime<=commitAt){
+    tone(isBoss?110:145,.13);
+    if(d<range&&Math.cos(Math.atan2(dy,dx)-h.slashAngle)>Math.cos(1)&&player.hurt<=0){
+      player.hp=Math.max(0,player.hp-dmg);player.hurt=.55;scare=isBoss?.3:.16;
+      say(isBoss?'Boss slam! −10 HP. Get clear!':'Claw slash! −5 HP. Keep your distance!',1.3);ui();if(player.hp===0)finish();
     }else say('Slash dodged! Keep reeling it in.',1);
   }
-}else if(d<105&&h.slashCooldown===0){
-  h.slashTime=.73;h.slashCooldown=1.9;h.slashAngle=Math.atan2(dy,dx);
-  say('Claws raised! Back away or sidestep!',.65);tone(260,.10);
+}else if(d<trigger&&h.slashCooldown===0){
+  h.slashTime=windup;h.slashCooldown=cooldown;h.slashAngle=Math.atan2(dy,dx);
+  say(isBoss?'The boss rears back — brace yourself!':'Claws raised! Back away or sidestep!',.65);tone(isBoss?200:260,.10);
 }
 }
 function update(dt){time+=dt;scare=Math.max(0,scare-dt);noticeTime-=dt;player.hurt=Math.max(0,player.hurt-dt);player.slow=Math.max(0,player.slow-dt);if(!active)return;
@@ -111,13 +128,14 @@ if(!lockValid())lockedGhost=null;
 // Acquire before joystick movement can rotate the flashlight away.
 if(!lockedGhost&&vac){const candidate=target();if(candidate&&candidate.stun>0&&inBeam(candidate,340,.5))lockedGhost=candidate}
 if(mag>.12&&!lockedGhost)player.a=Math.atan2(my,mx);
-move(mx*dt*(vac?118:185)*slowMul,my*dt*(vac?118:185)*slowMul);
+const moveSpeed=vac?118:(running?260:185);
+move(mx*dt*moveSpeed*slowMul,my*dt*moveSpeed*slowMul);
 if(lockValid())player.a=Math.atan2(lockedGhost.y-player.y,lockedGhost.x-player.x);else lockedGhost=null;
-dustCd-=dt;if(mag>.12&&dustCd<=0){dustCd=.06;const back=player.a+Math.PI;for(let i=0;i<2;i++){const ang=back+(Math.random()-.5)*1.4;particles.push({x:player.x+Math.cos(ang)*14,y:player.y+Math.sin(ang)*14,vx:Math.cos(ang)*30+(Math.random()-.5)*20,vy:Math.sin(ang)*30+(Math.random()-.5)*20,life:.35+Math.random()*.25,color:'#8a7a63',kind:'dust'})}}
+dustCd-=dt;if(mag>.12&&dustCd<=0){dustCd=running?.04:.06;const back=player.a+Math.PI,n=running?3:2;for(let i=0;i<n;i++){const ang=back+(Math.random()-.5)*1.4;particles.push({x:player.x+Math.cos(ang)*14,y:player.y+Math.sin(ang)*14,vx:Math.cos(ang)*(running?45:30)+(Math.random()-.5)*20,vy:Math.sin(ang)*(running?45:30)+(Math.random()-.5)*20,life:.35+Math.random()*.25,color:'#8a7a63',kind:'dust'})}}
 if(battery){battery.age+=dt;if(battery.age>.35&&player.hp<maxHp&&Math.hypot(player.x-battery.x,player.y-battery.y)<42){const gain=Math.min(50,maxHp-player.hp);player.hp+=gain;burst(battery.x,battery.y,'#8effbc',30);battery=null;tone(850,.3);say('Recharged +'+gain+' HP!',2);ui()}}
 for(const c of coinPickups){if(!c.taken&&Math.hypot(player.x-c.x,player.y-c.y)<38){c.taken=true;coins+=c.v;burst(c.x,c.y,c.kind==='silver'?'#d8e0e6':'#ffd35c',16);tone(820,.12);say('+'+c.v+' coins',1.3);ui()}}
 if(!announcedGraveyard&&roomAt(player.x,player.y).name.startsWith('grave')){announcedGraveyard=true;say('A graveyard beyond the mansion... treasure glints among the headstones.',3.5)}
-if(!announcedBoss&&bossGate&&Math.hypot(player.x-bossGate.x,player.y-bossGate.y)<170){announcedBoss=true;say('The far gate is sealed shut. Something bigger sleeps beyond — not yet.',3.5)}
+if(!announcedBoss&&!bossSpawned&&bossGate&&Math.hypot(player.x-bossGate.x,player.y-bossGate.y)<170){announcedBoss=true;say('The far gate is sealed shut. Something bigger sleeps beyond — capture all 4 graveyard ghosts.',3.8)}
 // Doors bang open on actual contact, swinging away from whichever side the robot bumped
 // from (so the same door can swing either way), and ease shut once it backs off - a
 // reusable startle, not a one-shot animation.
@@ -136,11 +154,19 @@ g.noSuction=0;g.stun=Math.max(g.stun,.4);
 const dx=g.x-player.x,dy=g.y-player.y,d=Math.hypot(dx,dy)||1,nx=dx/d,ny=dy/d;
 const counter=clamp(-(mx*nx+my*ny),0,1);
 g.captureAge=(g.captureAge||0)+dt;
-const ramp=1-Math.exp(-g.captureAge*7),strength=clamp(g.hp/100,0,1);
+const gMax=g.maxHpBoss||100;
+const ramp=1-Math.exp(-g.captureAge*7),strength=clamp(g.hp/gMax,0,1);
 const finishPull=clamp((.30-strength)/.30,0,1);
 // Approximately 3 seconds when bracing, 4.5 when simply holding suction.
 // Smooth forces replace the old instantaneous 42px ghost / 24px robot jumps.
 g.hp-=dt*(21+12*counter+5*finishPull)*suctionMul;
+// The boss breaks free once suctioned down to half health - a brief re-stun-immune, fully
+// aggressive window (a real "phase 2" beat) rather than one long uninterrupted drain.
+if(g.type==='boss'&&g.phase===0&&g.hp<=gMax*.5){
+g.phase=1;g.hp=gMax*.5;g.stun=0;g.stunImmuneCd=2.2;lockedGhost=null;
+burst(g.x,g.y,'#c23f3f',50);tone(50,.6);scare=Math.max(scare,.4);
+say('The boss breaks free and roars in fury!',3);
+}
 g.pullingBack=counter;g.tension=ramp*(.45+.55*strength);
 const wave=Math.sin(g.captureAge*3.4+g.seed)*.5+.5;
 const drag=(62+34*strength+12*wave)*ramp*(1-counter*.28)*(1-finishPull*.7);
@@ -158,10 +184,23 @@ g.captureVY=(g.captureVY||0)+(gy-(g.captureVY||0))*blend;
 const inward=g.captureVX*nx+g.captureVY*ny;
 if(d<85&&inward<0){g.captureVX-=inward*nx;g.captureVY-=inward*ny}
 ghostMove(g,g.captureVX*dt,g.captureVY*dt);
-if(g.hp<=0){g.caught=true;if(lockedGhost===g)lockedGhost=null;caught++;burst(g.x,g.y,g.color,40);tone(880,.3);say('Ghost bottled!',2);ui();if(caught===3){note={x:g.x,y:g.y};key={x:g.x+26,y:g.y};burst(g.x,g.y,'#f5e4b8',24);tone(700,.4);say('The last ghost drops a note — and a key glints beside it!',3);ui()}}}
+if(g.hp<=0){
+g.caught=true;if(lockedGhost===g)lockedGhost=null;burst(g.x,g.y,g.color,40);tone(880,.3);ui();
+if(g.zone==='mansion'){
+caught++;say('Ghost bottled!',2);ui();
+if(caught===3){note={x:g.x,y:g.y};key={x:g.x+26,y:g.y};burst(g.x,g.y,'#f5e4b8',24);tone(700,.4);say('The last ghost drops a note — and a key glints beside it!',3);ui()}
+}else if(g.zone==='graveyard'){
+graveCaught++;say('Ghost bottled! ('+graveCaught+'/4 graveyard ghosts)',2.4);ui();
+if(graveCaught===4){unlockBossGate();burst(bossGate.x,bossGate.y,'#c23f3f',30);tone(60,.5);say('The gate shudders and swings open — the boss awaits!',4);spawnBoss()}
+}else if(g.zone==='boss'){
+burst(g.x,g.y,'#c23f3f',60);tone(60,.6);finishVictory();
+}
+}}
 for(const h of ghosts){if(h.caught)continue;
+h.stunImmuneCd=Math.max(0,(h.stunImmuneCd||0)-dt);
 if(!(linked&&h===g)){h.captureAge=0;h.pullVX=0;h.pullVY=0;h.captureVX=0;h.captureVY=0;h.tension=0;h.pullingBack=0}
-if(h.locked&&!(linked&&h===g)){h.noSuction+=dt;if(h.noSuction>2){const wasLocked=lockedGhost===h;respawn(h);if(wasLocked)say('It escaped! Keep suction going to stop it relocating.',2);continue}h.stun=Math.max(0,h.stun-dt);if(h.stun<=0)h.locked=false}
+// The boss holds its ground - it never relocates for lack of suction like regular ghosts do.
+if(h.locked&&h.type!=='boss'&&!(linked&&h===g)){h.noSuction+=dt;if(h.noSuction>2){const wasLocked=lockedGhost===h;respawn(h);if(wasLocked)say('It escaped! Keep suction going to stop it relocating.',2);continue}h.stun=Math.max(0,h.stun-dt);if(h.stun<=0)h.locked=false}
 if(h.state==='warning'){
 if(lightOn&&inBeam(h)){h.state='roam';h.attackTime=0;burst(h.x,h.y,h.color,10);tone(140,.2);say('It saw your light — now it’s hunting you!',2)}
 else{
@@ -172,7 +211,9 @@ if(pd<220){const creep=14+40*(1-pd/220);ghostMove(h,pdx/pd*dt*creep,pdy/pd*dt*cr
 continue;
 }
 const lit=lightOn&&inBeam(h,240,.52);
-if(lit){if(h.stun<=0){burst(h.x,h.y,h.color,6);tone(500,.08)}if(!lockValid())lockedGhost=h;if(h.state==='lunge')h.state='roam';h.stun=Math.max(h.stun,1);h.locked=true;h.noSuction=0}
+// A boss that just broke free is briefly immune to being re-stunned - it has to be
+// out-lasted through its enrage window before the light can lock it down again.
+if(lit&&(h.stunImmuneCd||0)<=0){if(h.stun<=0){burst(h.x,h.y,h.color,6);tone(500,.08)}if(!lockValid())lockedGhost=h;if(h.state==='lunge')h.state='roam';h.stun=Math.max(h.stun,1);h.locked=true;h.noSuction=0}
 h.reveal=Math.min(1,h.reveal+dt/.4);
 redSlash(h,dt);if(!active)return;
 if((h.slashTime||0)>0)continue;
@@ -184,17 +225,27 @@ if(d<260)ghostMove(h,-dx/d*dt*85,-dy/d*dt*85);
 h.fireCd-=dt;
 if(d>380)ghostMove(h,dx/d*dt*70,dy/d*dt*70);else if(d<260)ghostMove(h,-dx/d*dt*55,-dy/d*dt*55);
 if(!iceBolt&&h.fireCd<=0&&d<650){iceBolt={x:h.x,y:h.y,vx:dx/d*260,vy:dy/d*260,life:2.2};h.fireCd=2.6;tone(500,.15)}
+}else if(h.type==='boss'){
+// A tougher hybrid: closes faster, charges more often, and layers ice bolts on top.
+h.fireCd-=dt;
+if(h.state==='lunge'){ghostMove(h,h.vx*dt,h.vy*dt);h.rush-=dt;if(h.rush<=0){h.state='roam';h.attackTime=.4}}
+else if(d<420&&h.attackTime<=0){h.state='lunge';h.rush=.5;h.vx=dx/d*260;h.vy=dy/d*260;tone(90,.15)}
+else ghostMove(h,dx/d*dt*95,dy/d*dt*95);
+if(!iceBolt&&h.fireCd<=0&&d<700){iceBolt={x:h.x,y:h.y,vx:dx/d*300,vy:dy/d*300,life:2.4};h.fireCd=2.1;tone(480,.15)}
 }else if(h.state==='lunge'){ghostMove(h,h.vx*dt,h.vy*dt);h.rush-=dt;if(h.rush<=0){h.state='roam';h.attackTime=.65}}
 else if(d<390&&h.attackTime<=0){h.state='lunge';h.rush=.6;h.vx=dx/d*200;h.vy=dy/d*200;tone(110,.12)}
 else ghostMove(h,dx/d*dt*72,dy/d*dt*72);
 contact(h);if(!active)return;
 }
 if(lockValid())player.a=Math.atan2(lockedGhost.y-player.y,lockedGhost.x-player.x);
-const current=target();$('#fill').style.width=current?(100-current.hp)+'%':'0%';$('#label').textContent=linked&&g&&!g.caught?'LOCKED ON · '+Math.floor(100-g.hp)+'% · PULL BACK':current?.stun>0?'LOCKED · VACUUM NOW · '+Math.max(0,2-current.noSuction).toFixed(1)+'s':'LIGHT ON TO SPOT · VACUUM TO CAPTURE';
-if(noticeTime<=0)$('#message').textContent=linked?(g.hp<30?'Almost in! Keep pulling!':g.pullingBack>.45?'Good brace! You’re reeling it in.':'It’s dragging you! Pull away with the joystick.') :current?.stun>0?'Hold VACUUM — ghosts relocate after 2 seconds without suction.':lightOn?(lightCharge<maxLightCharge*.2?'Battery low! It’ll cut out soon — find a target fast.':'Sweep the light around — it stuns whatever it touches.'):shopOpen?'Welcome! Spend your coins on upgrades.':'Turn the light on to see. It wakes hidden ghosts and stuns awake ones.';
+const current=target(),pct=h=>Math.floor(100-h.hp/(h.maxHpBoss||100)*100);
+$('#fill').style.width=current?pct(current)+'%':'0%';$('#label').textContent=linked&&g&&!g.caught?'LOCKED ON · '+pct(g)+'% · PULL BACK':current?.stun>0?'LOCKED · VACUUM NOW · '+Math.max(0,2-current.noSuction).toFixed(1)+'s':'LIGHT ON TO SPOT · VACUUM TO CAPTURE';
+if(noticeTime<=0)$('#message').textContent=linked?(g.hp<(g.maxHpBoss||100)*.3?'Almost in! Keep pulling!':g.pullingBack>.45?'Good brace! You’re reeling it in.':'It’s dragging you! Pull away with the joystick.') :current?.stun>0?'Hold VACUUM — ghosts relocate after 2 seconds without suction.':lightOn?(lightCharge<maxLightCharge*.2?'Battery low! It’ll cut out soon — find a target fast.':'Sweep the light around — it stuns whatever it touches.'):shopOpen?'Welcome! Spend your coins on upgrades.':'Turn the light on to see. It wakes hidden ghosts and stuns awake ones.';
 }
 let world3d;try{world3d=createHaunt(canvas)}catch(error){$('#message').textContent='3D needs WebGL. Try opening this page in Safari or Chrome.';throw error}
 function render(dt){particles=particles.filter(p=>p.life>0);particles.forEach(p=>{p.life-=dt;p.x+=p.vx*dt;p.y+=p.vy*dt});world3d.render({player,ghosts,particles,time,dt,lightOn,lightCharge,maxLightCharge,vac,lockedGhost,scare,battery,tableUsed,iceBolt,note,key,coinPickups,doorOpen})}
 function frame(t){const dt=Math.min((t-last)/1000||0,.04);last=t;update(dt);render(dt);requestAnimationFrame(frame)}
 let pointer=null;const stick=$('#stick');function stickMove(e){const r=stick.getBoundingClientRect(),x=e.clientX-r.left-r.width/2,y=e.clientY-r.top-r.height/2,d=Math.hypot(x,y),scale=d>38?38/d:1;joy={x:x*scale/38,y:y*scale/38};$('#knob').style.transform=`translate(${x*scale}px,${y*scale}px)`}stick.addEventListener('pointerdown',e=>{e.preventDefault();pointer=e.pointerId;stick.setPointerCapture(pointer);stickMove(e)});stick.addEventListener('pointermove',e=>{if(e.pointerId===pointer)stickMove(e)});function endStick(){pointer=null;joy={x:0,y:0};$('#knob').style.transform=''}stick.addEventListener('pointerup',endStick);stick.addEventListener('pointercancel',endStick);stick.addEventListener('lostpointercapture',endStick);
-$('#flash').addEventListener('pointerdown',e=>{e.preventDefault();toggleLight()});$('#flash').addEventListener('click',e=>{if(e.detail===0)toggleLight()});$('#vacuum').addEventListener('pointerdown',e=>{e.preventDefault();e.currentTarget.setPointerCapture(e.pointerId);vac=true;e.currentTarget.classList.add('active')});function endVac(){vac=false;$('#vacuum').classList.remove('active')}['pointerup','pointercancel','lostpointercapture'].forEach(s=>$('#vacuum').addEventListener(s,endVac));window.addEventListener('keydown',e=>{const k=e.key.length===1?e.key.toLowerCase():e.key;if([' ','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','w','a','s','d','v'].includes(k))e.preventDefault();keys[k]=true;if(k===' '&&!e.repeat)toggleLight();if(k==='v')vac=true});window.addEventListener('keyup',e=>{const k=e.key.length===1?e.key.toLowerCase():e.key;keys[k]=false;if(k==='v')endVac()});function release(){keys={};endVac();endStick()}window.addEventListener('blur',release);document.addEventListener('visibilitychange',()=>{if(document.hidden)release()});$('#reset').onclick=reset;$('#again').onclick=reset;$('#sound').onclick=()=>{sound=!sound;$('#sound').textContent=sound?'Sound on':'Sound off';tone(440)};UPGRADES.forEach(u=>$('#buy-'+u.id).addEventListener('click',()=>buyUpgrade(u.id)));reset();requestAnimationFrame(frame);
+$('#flash').addEventListener('pointerdown',e=>{e.preventDefault();toggleLight()});$('#flash').addEventListener('click',e=>{if(e.detail===0)toggleLight()});$('#vacuum').addEventListener('pointerdown',e=>{e.preventDefault();e.currentTarget.setPointerCapture(e.pointerId);vac=true;e.currentTarget.classList.add('active')});function endVac(){vac=false;$('#vacuum').classList.remove('active')}['pointerup','pointercancel','lostpointercapture'].forEach(s=>$('#vacuum').addEventListener(s,endVac));
+$('#run').addEventListener('pointerdown',e=>{e.preventDefault();e.currentTarget.setPointerCapture(e.pointerId);running=true;e.currentTarget.classList.add('active')});function endRun(){running=false;$('#run').classList.remove('active')}['pointerup','pointercancel','lostpointercapture'].forEach(s=>$('#run').addEventListener(s,endRun));
+window.addEventListener('keydown',e=>{const k=e.key.length===1?e.key.toLowerCase():e.key;if([' ','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','w','a','s','d','v','Shift'].includes(k))e.preventDefault();keys[k]=true;if(k===' '&&!e.repeat)toggleLight();if(k==='v')vac=true;if(k==='Shift')running=true});window.addEventListener('keyup',e=>{const k=e.key.length===1?e.key.toLowerCase():e.key;keys[k]=false;if(k==='v')endVac();if(k==='Shift')endRun()});function release(){keys={};endVac();endRun();endStick()}window.addEventListener('blur',release);document.addEventListener('visibilitychange',()=>{if(document.hidden)release()});$('#reset').onclick=reset;$('#again').onclick=reset;$('#sound').onclick=()=>{sound=!sound;$('#sound').textContent=sound?'Sound on':'Sound off';tone(440)};UPGRADES.forEach(u=>$('#buy-'+u.id).addEventListener('click',()=>buyUpgrade(u.id)));reset();requestAnimationFrame(frame);

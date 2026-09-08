@@ -95,8 +95,13 @@ export const mansionDoors=[
 // an actual door panel (scene3d.js) that bangs open as the player approaches, rather than
 // reading as an empty hallway stretch between rooms.
 const GY_COUNT=5,GY_MIN_W=380,GY_MAX_W=560,GY_GAP=24,GY_DOOR_H=110,GY_MARGIN=30,BOSS_W=440;
-export let graveyardRooms=[],bossRoom=null,graveyardCoinSpots=[],graveyardDoors=[],bossGate=null,graveyardObstacles=[];
-let graveyardWalls=[],bossSeal=[];
+export let graveyardRooms=[],bossRoom=null,graveyardCoinSpots=[],graveyardDoors=[],bossGate=null,graveyardObstacles=[],graveyardGhostSpawns=[],bossSpawn=null;
+let graveyardWalls=[],bossSeal=[],bossSealRect=null;
+// The boss room stays sealed until all 4 graveyard ghosts are captured (see game.js) -
+// unlockBossGate()/lockBossGate() mirror the mansion's exterior-door lock exactly.
+export let bossUnlocked=false;
+export function unlockBossGate(){bossUnlocked=true;bossSeal=[]}
+export function lockBossGate(){bossUnlocked=false;bossSeal=bossSealRect?[bossSealRect]:[]}
 const rand=(a,b)=>a+Math.random()*(b-a),ri=(a,b)=>Math.floor(rand(a,b+1));
 export function generateGraveyard(){
   const rooms_=[],walls_=[],stones_=[],coins_=[],doors_=[];
@@ -139,8 +144,13 @@ export function generateGraveyard(){
   graveyardCoinSpots=coins_.map(c=>({x:c.x*ROOM_SCALE,y:c.y*ROOM_SCALE,v:c.v,kind:c.kind}));
   graveyardDoors=doors_;
   const bossDoor=doors_.find(d=>d.isBoss);
-  bossSeal=[{x:bossDoor.x-GY_GAP*ROOM_SCALE/2,y:bossDoor.range[0],w:GY_GAP*ROOM_SCALE,h:bossDoor.range[1]-bossDoor.range[0]}];
+  bossSealRect={x:bossDoor.x-GY_GAP*ROOM_SCALE/2,y:bossDoor.range[0],w:GY_GAP*ROOM_SCALE,h:bossDoor.range[1]-bossDoor.range[0]};
+  bossUnlocked=false;bossSeal=[bossSealRect];
   bossGate={x:bossDoor.x,y:(bossDoor.range[0]+bossDoor.range[1])/2};
+  // One ghost each in the first 4 graveyard rooms (grave5 stays a quiet approach to the
+  // gate) - all 4 must be captured before the boss gate will open.
+  graveyardGhostSpawns=rooms_.slice(0,4).map(r=>({x:(r.x+r.w/2)*ROOM_SCALE,y:(r.y+r.h/2)*ROOM_SCALE}));
+  bossSpawn={x:(boss.x+boss.w/2)*ROOM_SCALE,y:(boss.y+boss.h/2)*ROOM_SCALE};
   bounds={left:0,right:(boss.x+boss.w)*ROOM_SCALE,top:0,bottom:380*ROOM_SCALE};
   return {rooms:graveyardRooms,bossRoom};
 }

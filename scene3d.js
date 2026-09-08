@@ -1,5 +1,5 @@
 import * as THREE from './three.module.js';
-import {WORLD,healthTable,rooms,roomAt,DOOR_GAME,furniture as roomFurniture,yard,shopSpot,doorUnlocked,graveyardRooms,bossRoom,graveyardDoors,graveyardObstacles,bossGate,mansionDoors} from './room.js';
+import {WORLD,healthTable,rooms,roomAt,DOOR_GAME,furniture as roomFurniture,yard,shopSpot,doorUnlocked,graveyardRooms,bossRoom,graveyardDoors,graveyardObstacles,bossGate,mansionDoors,bossUnlocked} from './room.js';
 export function createHaunt(canvas){
 const renderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:false});renderer.setPixelRatio(Math.min(devicePixelRatio||1,1.7));renderer.setSize(720,720,false);renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.25;
 const scene=new THREE.Scene();scene.background=new THREE.Color('#080c15');scene.fog=new THREE.FogExp2('#080c15',.026);
@@ -122,16 +122,17 @@ const allDoorHinges=[
 // as the mansion furniture below.
 const graveStoneMat=mat('#8a93a0',{roughness:.85});
 graveyardObstacles.forEach(r=>{const x=px(r.x+r.w/2),z=px(r.y+r.h/2),g=new THREE.Group();scene.add(g);box(g,x,.32,z,.4,.62,.12,graveStoneMat);ball(g,x,.62,z,.2,graveStoneMat,[1,.55,.6])});
-// The boss room's entrance stays permanently barred this phase - the room is reserved,
-// not yet playable. A bigger, more ominous cousin of the mansion's sealed-door prop.
+// The boss room's entrance stays barred until all 4 graveyard ghosts are captured -
+// bossUnlocked is a live ES-module binding, re-read every render() just like doorUnlocked.
 const bossBar=mat('#2e2a24',{roughness:.85}),bossGlow=mat('#8a2f2f',{emissive:'#c23f3f',emissiveIntensity:1.1});
+let bossGateProp=null;
 if(bossGate){
   const bgx=px(bossGate.x),bgz=px(bossGate.y);
-  const gate=new THREE.Group();scene.add(gate);
-  box(gate,bgx,1.6,bgz,.3,3.2,1.9,bossBar);
-  for(let i=0;i<3;i++)box(gate,bgx,.5+i*1.1,bgz,.32,.14,2.1,bossBar);
-  ball(gate,bgx,1.6,bgz,.13,bossGlow);
-  gate.add(new THREE.PointLight('#c23f3f',1.6,2.4));
+  bossGateProp=new THREE.Group();scene.add(bossGateProp);
+  box(bossGateProp,bgx,1.6,bgz,.3,3.2,1.9,bossBar);
+  for(let i=0;i<3;i++)box(bossGateProp,bgx,.5+i*1.1,bgz,.32,.14,2.1,bossBar);
+  ball(bossGateProp,bgx,1.6,bgz,.13,bossGlow);
+  bossGateProp.add(new THREE.PointLight('#c23f3f',1.6,2.4));
 }
 roomFurniture.forEach((r,i)=>{const x=px(r.x+r.w/2),z=px(r.y+r.h/2),w=(r.w)/scale,d=(r.h)/scale,g=new THREE.Group();scene.add(g);box(g,x,.65,z,w,1.3,d,darkwood);box(g,x,1.36,z,w+.12,.16,d+.12,timber);for(let j=0;j<2;j++){box(g,x,.4+j*.57,z+d/2+.015,w-.18,.44,.07,timber);ball(g,x,.4+j*.57,z+d/2+.08,.055,brass)}if(i===0)for(let j=0;j<5;j++)box(g,x-.8+j*.32,1.7,z,.21,.57,.65,mat(['#576d65','#7a4947','#927745'][j%3]));});
 scene.add(new THREE.HemisphereLight('#8babc5','#25202b',.32));const moon=new THREE.DirectionalLight('#9bbaf3',.78);moon.position.set(-3,10,-5);moon.castShadow=true;moon.shadow.mapSize.set(2048,1024);Object.assign(moon.shadow.camera,{left:-40,right:40,top:20,bottom:-20});moon.shadow.bias=-.001;scene.add(moon);
@@ -145,7 +146,24 @@ const robot=new THREE.Group();scene.add(robot);robot.scale.setScalar(1.3);const 
 const body=new THREE.Group();robot.add(body);box(body,0,.78,0,.68,.59,.47,metal);ball(body,0,1.28,0,.45,metal,[1,.76,.76]);box(body,0,1.29,.303,.64,.27,.07,black);const eye=mat('#a8ffe2',{emissive:'#78edcc',emissiveIntensity:2});for(const x of [-.16,.16])box(body,x,1.29,.35,.095,.125,.025,eye);box(body,0,.85,-.36,.47,.6,.25,brass);for(const x of [-.43,.43])ball(body,x,.82,0,.14,metal,[.8,1.4,1]);box(body,0,1.67,0,.035,.2,.035,brass);ball(body,0,1.79,0,.065,eye);
 const nozzle=new THREE.Mesh(new THREE.CylinderGeometry(.17,.12,.45,20),metal);nozzle.rotation.x=Math.PI/2;nozzle.position.set(.32,.85,.4);body.add(nozzle);const opening=new THREE.Mesh(new THREE.CircleGeometry(.14,20),black);opening.position.set(.32,.85,.63);body.add(opening);
 const lamp=ball(body,0,1.53,.22,.11,mat('#fff0ba',{emissive:'#ffe4a1',emissiveIntensity:2}));const beam=new THREE.SpotLight('#fff0c0',65,6.4,.53,.65,1.2);beam.position.set(0,1.5,.35);body.add(beam);body.add(beam.target);beam.target.position.set(0,.65,6);const halo=new THREE.PointLight('#b2d6e0',3.5,3.2,2);halo.position.set(0,1,0);robot.add(halo);
-const ghosts=[],ghostGlow=[],ghostEyeMat=[],ghostLight=[],ghostTails=[];const ghostColors=['#a6f5cd','#ff6a5a','#ffcf92'];const ghostEyeColors=['#ffd35c','#ff2f22','#79e0ff'];ghostColors.forEach((color,gi)=>{const root=new THREE.Group();scene.add(root);const glow=mat(color,{transparent:true,opacity:.86,emissive:color,emissiveIntensity:.65,roughness:.2});ball(root,0,0,0,.47,glow,[1,1.22,.75]);const tails=[];for(let i=0;i<5;i++){const tail=new THREE.Mesh(new THREE.ConeGeometry(.15,.45+(i%2)*.18,10),glow);tail.rotation.z=Math.PI;tail.position.set((i-2)*.17,-.55,0);root.add(tail);tails.push(tail)}const eyeColor=ghostEyeColors[gi];const eyeMat=mat(eyeColor,{transparent:true,opacity:1,emissive:eyeColor,emissiveIntensity:3});for(const x of [-.17,.17]){ball(root,x,.12,.32,.14,black,[1,1.25,.45]);ball(root,x,.12,.38,.045,eyeMat);ball(root,x*3,-.15,0,.16,glow,[.65,1.8,.65])}ball(root,0,-.18,.34,.13,black,[.85,1.5,.3]);const light=new THREE.PointLight(color,2,2.3);root.add(light);ghosts.push(root);ghostGlow.push(glow);ghostEyeMat.push(eyeMat);ghostLight.push(light);ghostTails.push(tails)});
+// The regular-ghost visual pool covers the 3 mansion ghosts plus the 4 graveyard ghosts -
+// same order as game.js builds its ghosts[] array, so states[i] always lines up with
+// ghosts[i] here. The boss (a possible 8th, added later) gets its own dedicated model below
+// instead of a 9th slot in this pool, since it looks nothing like a regular ghost.
+const ghosts=[],ghostGlow=[],ghostEyeMat=[],ghostLight=[],ghostTails=[];
+const ghostColors=['#a6f5cd','#ff6a5a','#ffcf92','#c9a6f5','#8fffb0','#7fd4ff','#e8dcc0'];
+const ghostEyeColors=['#ffd35c','#ff2f22','#79e0ff','#e0b8ff','#3fffa0','#2fa8ff','#ffcf92'];
+ghostColors.forEach((color,gi)=>{const root=new THREE.Group();scene.add(root);const glow=mat(color,{transparent:true,opacity:.86,emissive:color,emissiveIntensity:.65,roughness:.2});ball(root,0,0,0,.47,glow,[1,1.22,.75]);const tails=[];for(let i=0;i<5;i++){const tail=new THREE.Mesh(new THREE.ConeGeometry(.15,.45+(i%2)*.18,10),glow);tail.rotation.z=Math.PI;tail.position.set((i-2)*.17,-.55,0);root.add(tail);tails.push(tail)}const eyeColor=ghostEyeColors[gi];const eyeMat=mat(eyeColor,{transparent:true,opacity:1,emissive:eyeColor,emissiveIntensity:3});for(const x of [-.17,.17]){ball(root,x,.12,.32,.14,black,[1,1.25,.45]);ball(root,x,.12,.38,.045,eyeMat);ball(root,x*3,-.15,0,.16,glow,[.65,1.8,.65])}ball(root,0,-.18,.34,.13,black,[.85,1.5,.3]);const light=new THREE.PointLight(color,2,2.3);root.add(light);ghosts.push(root);ghostGlow.push(glow);ghostEyeMat.push(eyeMat);ghostLight.push(light);ghostTails.push(tails)});
+// The boss: a much larger, spiked, blood-red cousin of the regular ghosts - built once,
+// shown/hidden and positioned each frame based on whether states[] currently has one.
+const bossGlowMat=mat('#8a1f24',{transparent:true,opacity:.92,emissive:'#c23f3f',emissiveIntensity:.85,roughness:.15});
+const bossEyeMat=mat('#ffcf3f',{transparent:true,opacity:1,emissive:'#ffb92e',emissiveIntensity:3.5});
+const bossRoot=new THREE.Group();scene.add(bossRoot);bossRoot.visible=false;
+ball(bossRoot,0,0,0,1.05,bossGlowMat,[1,1.28,.8]);
+const bossTails=[];for(let i=0;i<7;i++){const tail=new THREE.Mesh(new THREE.ConeGeometry(.32,1+(i%2)*.35,10),bossGlowMat);tail.rotation.z=Math.PI;tail.position.set((i-3)*.32,-1.15,0);bossRoot.add(tail);bossTails.push(tail)}
+for(const x of [-.38,.38]){ball(bossRoot,x,.28,.7,.3,black,[1,1.3,.5]);ball(bossRoot,x,.28,.85,.1,bossEyeMat)}
+const bossHornMat=mat('#3a1418',{roughness:.7});for(const x of [-.55,.55])box(bossRoot,x,.85,.15,.16,.55,.16,bossHornMat).rotation.z=x>0?-.35:.35;
+const bossLight=new THREE.PointLight('#c23f3f',4,4.5);bossRoot.add(bossLight);
 const iceMat=mat('#bdeeff',{transparent:true,opacity:.9,emissive:'#7fd4ff',emissiveIntensity:1.8,roughness:.15});const iceBoltMesh=new THREE.Mesh(new THREE.OctahedronGeometry(.14,0),iceMat);iceBoltMesh.add(new THREE.PointLight('#8fdcff',2.5,2));iceBoltMesh.visible=false;scene.add(iceBoltMesh);
 const tetherGeometry=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(),new THREE.Vector3()]);const tether=new THREE.Line(tetherGeometry,new THREE.LineBasicMaterial({color:'#b8ffe3',transparent:true,opacity:.9}));scene.add(tether);
 // A small reusable preallocated point cloud - avoids a per-frame buffer reallocation (was a stutter source).
@@ -158,6 +176,7 @@ const noteMat=mat('#e9dcb8',{roughness:.9});const noteProp=new THREE.Group();sce
 let previous=new THREE.Vector3(),first=true;
 return {render({player,ghosts:states,particles,time,dt=0,lightOn,lightCharge,maxLightCharge=100,vac,lockedGhost,scare,battery,tableUsed,iceBolt,note,key,coinPickups=[],doorOpen=[]}){
 sealDoor.visible=!doorUnlocked;
+if(bossGateProp)bossGateProp.visible=!bossUnlocked;
 // Bang open fast (with a slight overshoot past perpendicular for punch), ease shut slower.
 // doorOpen[i] is signed (-1/0/1) - which side the robot last bumped it from, so it can
 // swing either way, not just one fixed direction.
@@ -168,7 +187,7 @@ robot.visible=player.hurt<=0||Math.floor(time*18)%2===0;marker.visible=!tableUse
 const lowBattery=lightOn&&lightCharge<maxLightCharge*.2;const flicker=lowBattery?.75+Math.random()*.35:1;
 beam.intensity=lightOn?150*flicker:0;beam.distance=lightOn?7.6:6.4;lamp.material.emissiveIntensity=lightOn?6*flicker:.8;
 metal.emissive.set(player.slow>0?'#3aa0ff':'#000000');
-states.forEach((g,i)=>{const o=ghosts[i];o.visible=!g.caught&&g.state!=='hidden';if(!o.visible)return;
+states.forEach((g,i)=>{const o=ghosts[i];if(!o)return;o.visible=!g.caught&&g.state!=='hidden';if(!o.visible)return;
 const revealed=g.state==='warning'?0:(g.reveal??1);const hunting=g.state!=='warning';
 const bobSpeed=hunting?4.4+revealed*1.8:1.6,bobAmp=hunting?.15+revealed*.06:.08;
 const jitterX=hunting?Math.sin(time*15+g.seed*4)*.025*revealed:0,jitterZ=hunting?Math.cos(time*13+g.seed*3)*.025*revealed:0;
@@ -188,6 +207,26 @@ eyeIntensity=3*(1.5+Math.sin(time*20+g.seed)*.7);
 ghostEyeMat[i].emissiveIntensity=eyeIntensity;
 ghostTails[i].forEach((tail,ti)=>{const ph=g.seed+ti*1.3,tSpeed=beingSucked?18:hunting?7+revealed*3:2.5,tAmp=beingSucked?.34:hunting?.16+revealed*.14:.06;tail.rotation.x=Math.sin(time*tSpeed+ph)*tAmp;tail.rotation.y=Math.cos(time*tSpeed*.8+ph)*tAmp*.8;});
 });
+// The boss (not in the regular pool above - it's a states[] entry with type 'boss' once
+// spawnBoss() has run) gets its own bigger, angrier animation pass.
+const bossState=states.find(s=>s.type==='boss');
+bossRoot.visible=!!bossState&&!bossState.caught;
+if(bossRoot.visible){
+const g=bossState,enraged=(g.stunImmuneCd||0)>0,gMax=g.maxHpBoss||480;
+bossRoot.position.set(px(g.x),1.7+Math.sin(time*5.2+g.seed)*.22,px(g.y));
+bossRoot.rotation.y=Math.atan2(x-bossRoot.position.x,z-bossRoot.position.z);
+bossRoot.rotation.z=g.stun>0?Math.sin(time*18)*.05:Math.sin(time*3+g.seed)*.08;
+let eyeIntensity=3.5*(1+Math.sin(time*10+g.seed)*.4),size=1;
+if(g.state==='lunge'){const t=(g.rush??0)/.5,spike=Math.max(0,t-.7)/.3;size=1.25+spike*.35;eyeIntensity=3.5*(1+spike*2)}
+if(enraged){eyeIntensity=6+Math.sin(time*30)*3;size*=1.15}
+const beingSucked=vac&&lockedGhost===g&&!g.caught&&g.stun>0&&Math.hypot(g.x-player.x,g.y-player.y)<340;
+if(beingSucked){const strain=1-g.hp/gMax,stretch=1.25+Math.sin(time*11+g.seed)*.2+strain*.25;bossRoot.scale.set(size*.85,size*.85,size*stretch)}
+else bossRoot.scale.setScalar(size);
+bossEyeMat.emissiveIntensity=eyeIntensity;
+bossGlowMat.opacity=enraged?1:.92;bossGlowMat.emissiveIntensity=enraged?1.4:.85;
+bossTails.forEach((tail,ti)=>{const ph=g.seed+ti*1.1,tSpeed=beingSucked?16:enraged?12:6,tAmp=beingSucked?.3:.18;tail.rotation.x=Math.sin(time*tSpeed+ph)*tAmp;tail.rotation.y=Math.cos(time*tSpeed*.8+ph)*tAmp*.8;});
+bossLight.intensity=enraged?7:4;
+}
 iceBoltMesh.visible=!!iceBolt;if(iceBolt){iceBoltMesh.position.set(px(iceBolt.x),1.1,px(iceBolt.y));iceBoltMesh.rotation.y=time*6;iceBoltMesh.rotation.x=time*4;}
 tether.visible=!!(vac&&lockedGhost&&!lockedGhost.caught&&lockedGhost.stun>0&&Math.hypot(lockedGhost.x-player.x,lockedGhost.y-player.y)<340);if(tether.visible){const a=new THREE.Vector3(.32,.85,.64);body.localToWorld(a);tether.geometry.setFromPoints([a,new THREE.Vector3(px(lockedGhost.x),1.15,px(lockedGhost.y))]);tether.material.opacity=.7+Math.sin(time*26)*.3;halo.intensity=6+Math.sin(time*22)*2.5;}else halo.intensity=3.5;
 drawParticles(sparkSys,particles.filter(p=>p.kind!=='dust'),p=>.8+p.life*.5);
