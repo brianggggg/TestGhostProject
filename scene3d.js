@@ -146,26 +146,208 @@ const robot=new THREE.Group();scene.add(robot);robot.scale.setScalar(1.3);const 
 const body=new THREE.Group();robot.add(body);box(body,0,.78,0,.68,.59,.47,metal);ball(body,0,1.28,0,.45,metal,[1,.76,.76]);box(body,0,1.29,.303,.64,.27,.07,black);const eye=mat('#a8ffe2',{emissive:'#78edcc',emissiveIntensity:2});for(const x of [-.16,.16])box(body,x,1.29,.35,.095,.125,.025,eye);box(body,0,.85,-.36,.47,.6,.25,brass);for(const x of [-.43,.43])ball(body,x,.82,0,.14,metal,[.8,1.4,1]);box(body,0,1.67,0,.035,.2,.035,brass);ball(body,0,1.79,0,.065,eye);
 const nozzle=new THREE.Mesh(new THREE.CylinderGeometry(.17,.12,.45,20),metal);nozzle.rotation.x=Math.PI/2;nozzle.position.set(.32,.85,.4);body.add(nozzle);const opening=new THREE.Mesh(new THREE.CircleGeometry(.14,20),black);opening.position.set(.32,.85,.63);body.add(opening);
 const lamp=ball(body,0,1.53,.22,.11,mat('#fff0ba',{emissive:'#ffe4a1',emissiveIntensity:2}));const beam=new THREE.SpotLight('#fff0c0',65,6.4,.53,.65,1.2);beam.position.set(0,1.5,.35);body.add(beam);body.add(beam.target);beam.target.position.set(0,.65,6);const halo=new THREE.PointLight('#b2d6e0',3.5,3.2,2);halo.position.set(0,1,0);robot.add(halo);
-// The regular-ghost visual pool covers the 3 mansion ghosts plus the 4 graveyard ghosts -
-// same order as game.js builds its ghosts[] array, so states[i] always lines up with
-// ghosts[i] here. The boss (a possible 8th, added later) gets its own dedicated model below
-// instead of a 9th slot in this pool, since it looks nothing like a regular ghost.
-const ghosts=[],ghostGlow=[],ghostEyeMat=[],ghostLight=[],ghostTails=[];
+// ---- Ghost characters ------------------------------------------------------------------
+// Three silhouettes, each with a real head/torso/arms/tail rig so they can react (crane,
+// lunge, panic) rather than just bob. The archetype is index%3, which lines up exactly with
+// the flee/melee/ice type cycling game.js uses across the 3 mansion + 4 graveyard ghosts:
+// 0 Peeker (flee, tall and craning), 1 Grinner (melee, wide and toothy), 2 Hollow (ice, an
+// open hood). The boss runs the same rig at a larger scale with horns, so it animates with
+// the same vocabulary instead of needing a parallel implementation.
 const ghostColors=['#a6f5cd','#ff6a5a','#ffcf92','#c9a6f5','#8fffb0','#7fd4ff','#e8dcc0'];
-const ghostEyeColors=['#ffd35c','#ff2f22','#79e0ff','#e0b8ff','#3fffa0','#2fa8ff','#ffcf92'];
-ghostColors.forEach((color,gi)=>{const root=new THREE.Group();scene.add(root);const glow=mat(color,{transparent:true,opacity:.86,emissive:color,emissiveIntensity:.65,roughness:.2});ball(root,0,0,0,.47,glow,[1,1.22,.75]);const tails=[];for(let i=0;i<5;i++){const tail=new THREE.Mesh(new THREE.ConeGeometry(.15,.45+(i%2)*.18,10),glow);tail.rotation.z=Math.PI;tail.position.set((i-2)*.17,-.55,0);root.add(tail);tails.push(tail)}const eyeColor=ghostEyeColors[gi];const eyeMat=mat(eyeColor,{transparent:true,opacity:1,emissive:eyeColor,emissiveIntensity:3});for(const x of [-.17,.17]){ball(root,x,.12,.32,.14,black,[1,1.25,.45]);ball(root,x,.12,.38,.045,eyeMat);ball(root,x*3,-.15,0,.16,glow,[.65,1.8,.65])}ball(root,0,-.18,.34,.13,black,[.85,1.5,.3]);const light=new THREE.PointLight(color,2,2.3);root.add(light);ghosts.push(root);ghostGlow.push(glow);ghostEyeMat.push(eyeMat);ghostLight.push(light);ghostTails.push(tails)});
-// The boss: a much larger, spiked, blood-red cousin of the regular ghosts - built once,
-// shown/hidden and positioned each frame based on whether states[] currently has one.
-const bossGlowMat=mat('#8a1f24',{transparent:true,opacity:.92,emissive:'#c23f3f',emissiveIntensity:.85,roughness:.15});
-const bossEyeMat=mat('#ffcf3f',{transparent:true,opacity:1,emissive:'#ffb92e',emissiveIntensity:3.5});
-const bossRoot=new THREE.Group();scene.add(bossRoot);bossRoot.visible=false;
-ball(bossRoot,0,0,0,1.05,bossGlowMat,[1,1.28,.8]);
-const bossTails=[];for(let i=0;i<7;i++){const tail=new THREE.Mesh(new THREE.ConeGeometry(.32,1+(i%2)*.35,10),bossGlowMat);tail.rotation.z=Math.PI;tail.position.set((i-3)*.32,-1.15,0);bossRoot.add(tail);bossTails.push(tail)}
-for(const x of [-.38,.38]){ball(bossRoot,x,.28,.7,.3,black,[1,1.3,.5]);ball(bossRoot,x,.28,.85,.1,bossEyeMat)}
-const bossHornMat=mat('#3a1418',{roughness:.7});for(const x of [-.55,.55])box(bossRoot,x,.85,.15,.16,.55,.16,bossHornMat).rotation.z=x>0?-.35:.35;
-const bossLight=new THREE.PointLight('#c23f3f',4,4.5);bossRoot.add(bossLight);
+const ghostEyeColors=['#e8ffd1','#ffd4a3','#79e0ff','#e0b8ff','#3fffa0','#2fa8ff','#ffe0b0'];
+const ARCH_NAMES=['Peeker','Grinner','Hollow'];
+function ghostMesh(parent,geometry,material){const mesh=new THREE.Mesh(geometry,material);mesh.castShadow=false;mesh.receiveShadow=false;parent.add(mesh);return mesh}
+function oval(parent,x,y,z,rx,ry,material){const mesh=ghostMesh(parent,new THREE.CircleGeometry(1,24),material);mesh.position.set(x,y,z);mesh.scale.set(rx,ry,1);return mesh}
+function wisp(parent,points,radius,material){
+  const curve=new THREE.CatmullRomCurve3(points.map(p=>new THREE.Vector3(...p)));
+  const geometry=new THREE.TubeGeometry(curve,18,radius,6,false);
+  // Taper the tube to a thread instead of a blunt cone.
+  const positions=geometry.attributes.position;
+  for(let j=0;j<=18;j++){
+    const center=curve.getPointAt(j/18),taper=1-.96*Math.pow(j/18,1.25);
+    for(let k=0;k<=6;k++){
+      const n=j*7+k;
+      positions.setXYZ(n,center.x+(positions.getX(n)-center.x)*taper,
+        center.y+(positions.getY(n)-center.y)*taper,center.z+(positions.getZ(n)-center.z)*taper);
+    }
+  }
+  geometry.computeVertexNormals();return ghostMesh(parent,geometry,material);
+}
+function makeGhost(arch,color,eyeColor,opts={}){
+  const root=new THREE.Group();root.name=opts.name||ARCH_NAMES[arch];root.visible=false;scene.add(root);
+  const skin=mat(color,{transparent:true,opacity:.72,depthWrite:false,emissive:color,emissiveIntensity:.2,roughness:.4});
+  const faceMat=new THREE.MeshBasicMaterial({color:'#061017',transparent:true,opacity:1,depthWrite:false,side:THREE.DoubleSide});
+  const eyesMat=new THREE.MeshBasicMaterial({color:eyeColor,transparent:true,opacity:1,depthWrite:false});
+  const rig=new THREE.Group();root.add(rig);
+  const torso=new THREE.Group();rig.add(torso);
+  const head=new THREE.Group();head.position.y=.26;rig.add(head);
+  const arms=[],eyes=[],sockets=[];
+  const belly=ghostMesh(torso,new THREE.SphereGeometry(1,20,14),skin);
+  belly.scale.set(...[[.31,.53,.27],[.56,.34,.32],[.40,.49,.28]][arch]);
+  belly.position.y=arch===1?.05:-.1;
+  let mouth,teeth;
+  if(arch===2){
+    // An open hood, not a solid ball with a face painted on it.
+    const rim=ghostMesh(head,new THREE.TorusGeometry(.34,.115,8,28),skin);
+    rim.scale.set(1,1.32,.8);rim.position.set(0,.06,.18);
+    const hood=ghostMesh(head,new THREE.SphereGeometry(.43,20,14),skin);
+    hood.position.z=-.13;hood.scale.set(1,1.25,.67);
+    oval(head,0,.055,.285,.285,.39,faceMat);
+    for(const sign of [-1,1])eyes.push(oval(head,sign*.115,.07,.298,.039,.055,eyesMat));
+    mouth=oval(head,0,-.16,.30,.018,.045,faceMat);
+  }else{
+    const skull=ghostMesh(head,new THREE.SphereGeometry(1,20,14),skin);
+    skull.scale.set(...(arch===0?[.35,.48,.30]:[.48,.31,.31]));
+    skull.position.y=arch===0?.07:.03;
+    for(const sign of [-1,1]){
+      const socket=oval(head,sign*(arch===0?.145:.20),.12,.29,arch===0?.12:.13,arch===0?.18:.095,faceMat);
+      socket.rotation.z=arch===0?sign*.12:-sign*.27;sockets.push(socket);
+      eyes.push(oval(head,socket.position.x,.12,.302,arch===0?.033:.043,arch===0?.057:.032,eyesMat));
+    }
+    mouth=oval(head,0,arch===0?-.19:-.12,.31,arch===0?.062:.31,arch===0?.10:.10,faceMat);
+    mouth.rotation.z=arch===1?-.14:0;
+    if(arch===1){
+      teeth=new THREE.Group();mouth.add(teeth);
+      for(let j=0;j<5;j++){
+        const tooth=ghostMesh(teeth,new THREE.ConeGeometry(.11,.45,3),eyesMat);
+        tooth.position.set((j-2)*.31,.40,.025);tooth.rotation.z=Math.PI;
+      }
+    }
+  }
+  if(opts.horns){
+    const hornMat=mat('#3a1418',{roughness:.7});
+    for(const sign of [-1,1]){const horn=ghostMesh(head,new THREE.BoxGeometry(.10,.42,.10),hornMat);horn.position.set(sign*.30,.30,-.02);horn.rotation.z=-sign*.42}
+  }
+  for(const sign of [-1,1]){
+    const arm=new THREE.Group();arm.position.set(sign*(arch===1?.49:.30),arch===1?.16:.02,0);rig.add(arm);
+    const length=arch===0?(sign<0?.66:.42):arch===1?.51:.39;
+    wisp(arm,[[0,0,0],[sign*.09,-length*.4,.04],[sign*.17,-length,.09]],arch===1?.105:.073,skin);
+    if(arch!==2){
+      for(let j=0;j<3;j++)wisp(arm,[[sign*.17+(j-1)*.055,-length,.09],
+        [sign*.20+(j-1)*.08,-length-.12,.13],
+        [sign*.14+(j-1)*.08,-length-(arch===1?.28:.17),.18]],.026,skin);
+    }
+    arms.push(arm);
+  }
+  const tail=new THREE.Group();tail.position.y=-.32;rig.add(tail);
+  const tailShape=arch===0?[[0,0,0],[.05,-.45,0],[.28,-.70,.05],[.39,-.46,.1],[.25,-.42,.1]]:
+    arch===1?[[0,0,0],[-.08,-.35,0],[-.27,-.51,-.08],[-.38,-.40,-.08]]:
+    [[0,0,0],[0,-.39,0],[.17,-.66,-.04],[.32,-.78,0]];
+  wisp(tail,tailShape,arch===1?.24:.23,skin);
+  if(arch===2)for(const sign of [-1,1])wisp(tail,[[sign*.25,.05,0],[sign*.32,-.28,.02],[sign*.30,-.58,.1]],.09,skin);
+  // A short, reusable spiral shows the final capture without changing ghost state.
+  const spiral=new THREE.Group();root.add(spiral);spiral.visible=false;
+  for(let j=0;j<9;j++){
+    const mote=ghostMesh(spiral,new THREE.OctahedronGeometry(.055,0),eyesMat);
+    mote.userData.phase=j/9*Math.PI*2;
+  }
+  const light=new THREE.PointLight(color,.1,opts.boss?4.5:2);root.add(light);
+  return {root,rig,head,torso,arms,eyes,sockets,mouth,teeth,tail,skin,faceMat,eyesMat,light,spiral,arch,
+    boss:!!opts.boss,scale:opts.scale||1,baseY:opts.baseY||1.30,
+    state:null,wasCaught:false,captureAt:-1,visibility:0,lastTime:0,snapAngle:0};
+}
+const ghostRigs=ghostColors.map((color,i)=>makeGhost(i%3,color,ghostEyeColors[i]));
+// The boss is a Grinner grown huge and horned - same rig, same reactions, far more of it.
+const bossRig=makeGhost(1,'#c23f3f','#ffcf3f',{name:'Warden',boss:true,scale:2.1,baseY:1.9,horns:true});
+const captureNozzle=new THREE.Vector3();
+// A telegraph for the melee/boss claw swipe: a warning wedge on the floor during the
+// wind-up, then claw arcs on the commit frame.
+const slashIndicator=new THREE.Group();scene.add(slashIndicator);slashIndicator.visible=false;
+// Additive, not normal-blended: this game's floors are far darker than the room this
+// telegraph was first drawn for, and a low-opacity red over near-black just reads as a
+// smudge. Additive makes it glow as an actual warning.
+const slashWarningMaterial=new THREE.MeshBasicMaterial({color:'#ff634f',transparent:true,opacity:.2,side:THREE.DoubleSide,depthWrite:false,blending:THREE.AdditiveBlending});
+const slashWarning=new THREE.Mesh(new THREE.RingGeometry(.32,125/60,36,1,-1,2),slashWarningMaterial);
+slashWarning.rotation.x=-Math.PI/2;slashWarning.position.y=.045;slashIndicator.add(slashWarning);
+const clawMaterial=new THREE.MeshBasicMaterial({color:'#ffb591',transparent:true,opacity:.8,side:THREE.DoubleSide,depthWrite:false,blending:THREE.AdditiveBlending});
+const clawTrails=[];for(let i=0;i<3;i++){
+  const claw=new THREE.Mesh(new THREE.RingGeometry(1.25+i*.16,1.30+i*.16,30,1,-1,2),clawMaterial);
+  claw.rotation.x=-Math.PI/2;claw.position.y=.7+i*.14;slashIndicator.add(claw);clawTrails.push(claw);
+}
 const iceMat=mat('#bdeeff',{transparent:true,opacity:.9,emissive:'#7fd4ff',emissiveIntensity:1.8,roughness:.15});const iceBoltMesh=new THREE.Mesh(new THREE.OctahedronGeometry(.14,0),iceMat);iceBoltMesh.add(new THREE.PointLight('#8fdcff',2.5,2));iceBoltMesh.visible=false;scene.add(iceBoltMesh);
-const tetherGeometry=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(),new THREE.Vector3()]);const tether=new THREE.Line(tetherGeometry,new THREE.LineBasicMaterial({color:'#b8ffe3',transparent:true,opacity:.9}));scene.add(tether);
+// A reusable wind funnel replacing the old single tether line: broad translucent flow,
+// luminous helical ribbons, moving wind streaks, and floor dust converging on the nozzle.
+// All buffers are allocated once and rewritten in place.
+const suction=new THREE.Group();suction.visible=false;scene.add(suction);
+const flowEnd=new THREE.Vector3(),flowAxis=new THREE.Vector3(),flowSide=new THREE.Vector3(),flowUp=new THREE.Vector3();
+const upAxis=new THREE.Vector3(0,1,0),flowPoint=new THREE.Vector3(),flowColor=new THREE.Color();
+function ribbon(width,opacity,phase,turns){
+  const segments=40,positions=new Float32Array((segments+1)*6),indices=[];
+  for(let j=0;j<segments;j++){const n=j*2;indices.push(n,n+1,n+2,n+1,n+3,n+2)}
+  const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.BufferAttribute(positions,3));geometry.setIndex(indices);
+  geometry.attributes.position.setUsage(THREE.DynamicDrawUsage);
+  const material=new THREE.MeshBasicMaterial({color:'#b5eee2',transparent:true,opacity,depthWrite:false,side:THREE.DoubleSide,blending:THREE.AdditiveBlending});
+  const mesh=new THREE.Mesh(geometry,material);mesh.frustumCulled=false;suction.add(mesh);
+  return {mesh,positions,width,opacity,phase,turns,segments};
+}
+const windRibbons=[ribbon(.16,.07,0,1.4),ribbon(.14,.06,Math.PI,1.4),
+  ribbon(.025,.58,0,2.4),ribbon(.019,.42,2.1,2.4),ribbon(.023,.50,4.2,2.4)];
+const streakGeometry=new THREE.BufferGeometry(),streakPositions=new Float32Array(38*6);
+streakGeometry.setAttribute('position',new THREE.BufferAttribute(streakPositions,3));streakGeometry.attributes.position.setUsage(THREE.DynamicDrawUsage);
+const streakMaterial=new THREE.LineBasicMaterial({color:'#d8fff3',transparent:true,opacity:.7,depthWrite:false,blending:THREE.AdditiveBlending});
+const streaks=new THREE.LineSegments(streakGeometry,streakMaterial);streaks.frustumCulled=false;suction.add(streaks);
+const vacuumDustGeometry=new THREE.BufferGeometry(),vacuumDustPositions=new Float32Array(70*3);
+vacuumDustGeometry.setAttribute('position',new THREE.BufferAttribute(vacuumDustPositions,3));vacuumDustGeometry.attributes.position.setUsage(THREE.DynamicDrawUsage);
+const vacuumDustMaterial=new THREE.PointsMaterial({color:'#d8c6a0',size:.065,transparent:true,opacity:.65,depthWrite:false});
+const vacuumDust=new THREE.Points(vacuumDustGeometry,vacuumDustMaterial);vacuumDust.frustumCulled=false;suction.add(vacuumDust);
+const fract=value=>value-Math.floor(value);
+let windStrength=0,windLastTime=0;
+function flowSample(t,angle,radius,out){
+  out.copy(captureNozzle).lerp(flowEnd,t);
+  out.addScaledVector(flowSide,Math.cos(angle)*radius);
+  out.addScaledVector(flowUp,Math.sin(angle)*radius);
+  // A shallow bowed centerline gives the stream a feeling of tension.
+  out.y+=Math.sin(t*Math.PI)*.075;
+  return out;
+}
+function updateSuction(time,vac,ghost,player){
+  const dt=time<windLastTime?0:Math.min(time-windLastTime,.05);
+  if(time<windLastTime)windStrength=0;
+  windLastTime=time;windStrength+=((vac?1:0)-windStrength)*(1-Math.exp(-dt*14));
+  suction.visible=windStrength>.015;if(!suction.visible)return;
+  const linked=!!ghost,tension=linked?(ghost.tension??.7):.2;
+  if(linked)flowEnd.set(px(ghost.x),1.01,px(ghost.y));
+  else flowEnd.set(captureNozzle.x+Math.cos(player.a)*2.7,.20,captureNozzle.z+Math.sin(player.a)*2.7);
+  flowAxis.subVectors(flowEnd,captureNozzle).normalize();
+  flowSide.crossVectors(flowAxis,upAxis);if(flowSide.lengthSq()<.001)flowSide.set(1,0,0);else flowSide.normalize();
+  flowUp.crossVectors(flowSide,flowAxis).normalize();
+  flowColor.set(linked?ghost.color:'#a9d9d0');
+  const rate=linked?1.25+tension*.45:.85;
+  for(const r of windRibbons){
+    r.mesh.material.color.copy(flowColor);r.mesh.material.opacity=r.opacity*windStrength*(linked?1:.5);
+    for(let j=0;j<=r.segments;j++){
+      const t=j/r.segments,angle=r.phase+t*Math.PI*2*r.turns+time*8*rate;
+      const radius=(.025+.26*t)*(linked?1:1.4);
+      flowSample(t,angle,radius,flowPoint);
+      const width=r.width*(.25+.75*Math.sin(Math.PI*t))*(.6+.4*t);
+      const ox=flowSide.x*Math.cos(angle)*width+flowUp.x*Math.sin(angle)*width;
+      const oy=flowSide.y*Math.cos(angle)*width+flowUp.y*Math.sin(angle)*width;
+      const oz=flowSide.z*Math.cos(angle)*width+flowUp.z*Math.sin(angle)*width;
+      const n=j*6;r.positions[n]=flowPoint.x-ox;r.positions[n+1]=flowPoint.y-oy;r.positions[n+2]=flowPoint.z-oz;
+      r.positions[n+3]=flowPoint.x+ox;r.positions[n+4]=flowPoint.y+oy;r.positions[n+5]=flowPoint.z+oz;
+    }
+    r.mesh.geometry.attributes.position.needsUpdate=true;
+  }
+  streakMaterial.color.copy(flowColor);streakMaterial.opacity=windStrength*(linked?.8:.38);
+  for(let j=0;j<38;j++){
+    const t=1-fract(time*rate*.85+j*.618033),angle=j*2.4+time*4+t*10;
+    for(let end=0;end<2;end++){
+      const s=Math.min(1,t+end*.045);
+      flowSample(s,angle+end*.22,.035+s*(.13+(j%4)*.055),flowPoint);
+      const n=j*6+end*3;streakPositions[n]=flowPoint.x;streakPositions[n+1]=flowPoint.y;streakPositions[n+2]=flowPoint.z;
+    }
+  }
+  streakGeometry.attributes.position.needsUpdate=true;
+  vacuumDustMaterial.opacity=windStrength*.65;
+  for(let j=0;j<70;j++){
+    const t=1-fract(time*(.48+(j%5)*.07)*rate+j*.618033),angle=j*2.399+time*3.5;
+    flowSample(t,angle,t*(.2+(j%7)*.10),flowPoint);
+    // Dust lifts off the floor and converges into the nozzle, not away from it.
+    flowPoint.y=captureNozzle.y*(1-t)+.045*t+Math.sin(t*Math.PI)*(.13+(j%3)*.07);
+    const n=j*3;vacuumDustPositions[n]=flowPoint.x;vacuumDustPositions[n+1]=flowPoint.y;vacuumDustPositions[n+2]=flowPoint.z;
+  }
+  vacuumDustGeometry.attributes.position.needsUpdate=true;
+}
 // A small reusable preallocated point cloud - avoids a per-frame buffer reallocation (was a stutter source).
 function makeParticleSystem(max,color,size,opacity){const geo=new THREE.BufferGeometry();const pos=new Float32Array(max*3);geo.setAttribute('position',new THREE.BufferAttribute(pos,3));geo.setDrawRange(0,0);const points=new THREE.Points(geo,new THREE.PointsMaterial({color,size,transparent:true,opacity}));scene.add(points);return {geo,pos,points,max}}
 const sparkSys=makeParticleSystem(170,'#c8fbe0',.07,.8);
@@ -187,48 +369,129 @@ robot.visible=player.hurt<=0||Math.floor(time*18)%2===0;marker.visible=!tableUse
 const lowBattery=lightOn&&lightCharge<maxLightCharge*.2;const flicker=lowBattery?.75+Math.random()*.35:1;
 beam.intensity=lightOn?150*flicker:0;beam.distance=lightOn?7.6:6.4;lamp.material.emissiveIntensity=lightOn?6*flicker:.8;
 metal.emissive.set(player.slow>0?'#3aa0ff':'#000000');
-states.forEach((g,i)=>{const o=ghosts[i];if(!o)return;o.visible=!g.caught&&g.state!=='hidden';if(!o.visible)return;
-const revealed=g.state==='warning'?0:(g.reveal??1);const hunting=g.state!=='warning';
-const bobSpeed=hunting?4.4+revealed*1.8:1.6,bobAmp=hunting?.15+revealed*.06:.08;
-const jitterX=hunting?Math.sin(time*15+g.seed*4)*.025*revealed:0,jitterZ=hunting?Math.cos(time*13+g.seed*3)*.025*revealed:0;
-o.position.set(px(g.x)+jitterX,1.2+Math.sin(time*bobSpeed+g.seed)*bobAmp,px(g.y)+jitterZ);
-o.rotation.y=Math.atan2(x-o.position.x,z-o.position.z);
-o.rotation.z=g.stun>0?Math.sin(time*22)*.07:hunting?Math.sin(time*(3+revealed*2)+g.seed)*.09:Math.sin(time*1.4+g.seed)*.04;
-ghostGlow[i].opacity=.035+.825*revealed;ghostGlow[i].emissiveIntensity=.02+.63*revealed;ghostEyeMat[i].opacity=Math.max(0,revealed*1.5-.5);ghostLight[i].intensity=.04+1.96*revealed;
-const eyePulse=hunting?1+Math.sin(time*9+g.seed*1.7)*.35:1;let eyeIntensity=3*eyePulse,size=hunting?1.08:1;
-if(g.state==='lunge'){const t=(g.rush??0)/.6,spike=Math.max(0,t-.7)/.3;size=1.5+spike*.4;eyeIntensity=3*(1+spike*2.2)}
-const beingSucked=vac&&lockedGhost===g&&!g.caught&&g.stun>0&&Math.hypot(g.x-player.x,g.y-player.y)<340;
-if(beingSucked){
-// Spaghettify toward the nozzle and flail in a panic - the "small thrilling battle" read.
-const strain=1-g.hp/100,stretch=1.3+Math.sin(time*13+g.seed)*.25+strain*.3;
-o.scale.set(size*.8,size*.8,size*stretch);
-eyeIntensity=3*(1.5+Math.sin(time*20+g.seed)*.7);
-}else o.scale.setScalar(size);
-ghostEyeMat[i].emissiveIntensity=eyeIntensity;
-ghostTails[i].forEach((tail,ti)=>{const ph=g.seed+ti*1.3,tSpeed=beingSucked?18:hunting?7+revealed*3:2.5,tAmp=beingSucked?.34:hunting?.16+revealed*.14:.06;tail.rotation.x=Math.sin(time*tSpeed+ph)*tAmp;tail.rotation.y=Math.cos(time*tSpeed*.8+ph)*tAmp*.8;});
+captureNozzle.set(.32,.85,.64);body.localToWorld(captureNozzle);
+const captureTarget=vac&&lockedGhost&&!lockedGhost.caught&&lockedGhost.stun>0&&
+  !['warning','hidden'].includes(lockedGhost.state)&&
+  Math.hypot(lockedGhost.x-player.x,lockedGhost.y-player.y)<380?lockedGhost:null;
+// Lean back against the pull while the roller ball keeps turning naturally.
+body.rotation.x=captureTarget?-.13*(captureTarget.tension??0):0;
+// Ghost rigs: eased visibility, per-archetype idle behaviour, panic faces while being
+// vacuumed, and a short spiral dissolve on capture. The boss runs the same pass at 2.1x.
+states.forEach((g,i)=>{
+  const v=g.type==='boss'?bossRig:ghostRigs[i];if(!v)return;
+  const o=v.root;
+  // reset() creates fresh gameplay objects; don't carry a capture into a replay.
+  if(v.state!==g||time<v.lastTime){v.state=g;v.wasCaught=g.caught;v.captureAt=-1;v.visibility=0;v.snapAngle=0}
+  const rdt=Math.max(0,Math.min(time-v.lastTime,.05));v.lastTime=time;
+  if(g.caught&&!v.wasCaught){v.captureAt=time;v.captureFrom=o.position.clone()}
+  v.wasCaught=g.caught;
+  const capturing=g.caught&&v.captureAt>=0&&time-v.captureAt<.65;
+  o.visible=(!g.caught&&g.state!=='hidden')||capturing;
+  if(!o.visible)return;
+  o.scale.setScalar(v.scale);o.rotation.z=0;v.rig.visible=!g.caught;v.spiral.visible=capturing;
+  if(capturing){
+    const t=(time-v.captureAt)/.65;
+    o.position.lerpVectors(v.captureFrom,captureNozzle,1-Math.pow(1-t,2));
+    o.rotation.set(0,0,0);v.rig.visible=t<.48;v.rig.scale.setScalar(Math.max(.01,1-t*2.05));
+    v.rig.rotation.z=t*9;v.skin.opacity=.7*(1-t);v.faceMat.opacity=1-t;
+    v.eyesMat.opacity=1-t;v.light.intensity=(1-t)*.6;
+    v.spiral.children.forEach((m,j)=>{
+      const a=m.userData.phase+t*18,r=(.37+j*.013)*(1-t);
+      m.position.set(Math.cos(a)*r,Math.sin(a)*r,(j-4)*.045*(1-t));
+      m.scale.setScalar(1-t*.8);
+    });
+    return;
+  }
+  const arch=v.arch,gMax=g.maxHpBoss||100;
+  const distance=Math.hypot(g.x-player.x,g.y-player.y);
+  const inLight=lightOn&&distance<350&&Math.cos(Math.atan2(g.y-player.y,g.x-player.x)-player.a)>Math.cos(.53);
+  const awake=g.state!=='warning'&&g.state!=='hidden';
+  const stunned=g.stun>0,beingSucked=captureTarget===g,lunging=g.state==='lunge'&&!stunned;
+  const enraged=(g.stunImmuneCd||0)>0,reveal=awake?(g.reveal??1):0;
+  // Dark ghosts stay readable but stop behaving like permanent lamps. The boss never hides -
+  // it keeps a high floor so you can always see what's charging you.
+  let visibility=(beingSucked||stunned||inLight)?.95:lunging?.70:awake?.27:.025;
+  if(v.boss)visibility=Math.max(visibility,enraged?1:.78);
+  v.visibility+=(visibility-v.visibility)*(1-Math.exp(-rdt*12));
+  const vis=v.visibility;
+  v.skin.opacity=.018+vis*.77;v.skin.emissiveIntensity=(enraged?.45:.025)+vis*.29;
+  v.faceMat.opacity=THREE.MathUtils.clamp(vis*1.8,0,1);
+  const eyeGlimpse=Math.pow(Math.max(0,Math.sin(time*1.2+g.seed)),18)*.28;
+  v.eyesMat.opacity=awake?Math.min(1,vis*1.6+.08):eyeGlimpse;
+  v.light.intensity=vis*(v.boss?(enraged?2.8:1.5):beingSucked?.7:.22);
+  const bob=stunned?0:Math.sin(time*(arch===2?1.3:2.7)+g.seed)*(arch===2?.035:.10);
+  o.position.set(px(g.x),v.baseY+bob,px(g.y));
+  o.rotation.y=Math.atan2(x-o.position.x,z-o.position.z);
+  v.rig.rotation.set(0,0,0);v.rig.scale.set(1,1,1);v.head.rotation.set(0,0,0);
+  v.head.position.set(0,.26,0);v.head.scale.set(1,1,1);v.torso.rotation.set(0,0,0);
+  v.tail.rotation.set(0,0,0);v.tail.scale.set(1,1,1);
+  const panic=beingSucked?1:stunned?.65:0;
+  if(arch===0){
+    // The Peeker cranes its head independently of its drooping body.
+    v.head.rotation.z=stunned?-.16:Math.sin(time*1.6+g.seed)*.28;
+    v.head.position.x=stunned?0:Math.sin(time*1.6+g.seed)*.075;
+    v.rig.scale.y=1+(stunned?.14:Math.max(0,Math.sin(time*2))*.06*reveal);
+  }else if(arch===1){
+    v.torso.rotation.x=lunging?-.20:.17;
+    v.head.position.z=lunging?.13:.055;
+    v.head.rotation.z=stunned?.12:-.08;
+    v.rig.scale.set(lunging?1.19:1,lunging?1.12:1,1);
+  }else{
+    // Deliberate stepped head turns, with a soft interpolation inside each snap.
+    const snap=Math.sin(Math.floor(time*1.4)+g.seed)*.28;
+    v.snapAngle+=(snap-v.snapAngle)*(1-Math.exp(-rdt*23));
+    v.head.rotation.y=stunned?0:v.snapAngle;
+    v.head.rotation.z=stunned?-.10:.035;
+  }
+  v.eyes.forEach(eye=>{
+    const width=arch===2?.039:arch===0?.033:.043,height=arch===2?.055:arch===0?.057:.032;
+    eye.scale.set(width*(1+panic*.50),height*(1+panic*.95),1);
+    eye.position.y=.12-(arch===2?.05:0);
+  });
+  v.sockets.forEach(socket=>{socket.scale.y=(arch===0?.18:.095)*(1+panic*.4)});
+  v.mouth.scale.set(arch===0?.062*(1+panic*.6):arch===1?(panic?.16:.31):.018,
+    arch===0?.10*(1+panic*.85):arch===1?(panic?.22:lunging?.20:.10):.045,1);
+  if(v.teeth)v.teeth.visible=panic<.5;
+  v.arms.forEach((arm,j)=>{
+    const side=j===0?-1:1;
+    arm.rotation.set(0,0,0);
+    arm.rotation.z=side*(beingSucked?1.35+Math.sin(time*5+j*2)*.16:stunned?1.12:lunging?1.65:.20+Math.sin(time*2+g.seed+j)*.12);
+    arm.rotation.x=beingSucked?-.40+Math.cos(time*4+j)*.10:0;
+  });
+  if(beingSucked){
+    const strain=1-THREE.MathUtils.clamp(g.hp/gMax,0,1);
+    v.rig.scale.set(.94-strain*.16,.95-strain*.10,1.08+strain*.35);
+    v.head.rotation.z+=Math.sin(time*4+g.seed)*.025;
+    // Local +Z faces the robot. Swing the lower tail toward the actual nozzle; the head
+    // stays behind it, rather than stretching the face into a tube.
+    v.tail.rotation.x=-1.12;
+    v.tail.rotation.z=Math.sin(time*5)*.04;
+    v.tail.scale.set(.85,1.4+strain*.65+Math.sin(time*5)*.04,1);
+  }else if(!stunned){
+    v.tail.rotation.z=Math.sin(time*(arch===2?1.4:3.2)+g.seed)*.12;
+    v.tail.rotation.x=Math.cos(time*2+g.seed)*.08;
+  }
 });
-// The boss (not in the regular pool above - it's a states[] entry with type 'boss' once
-// spawnBoss() has run) gets its own bigger, angrier animation pass.
-const bossState=states.find(s=>s.type==='boss');
-bossRoot.visible=!!bossState&&!bossState.caught;
-if(bossRoot.visible){
-const g=bossState,enraged=(g.stunImmuneCd||0)>0,gMax=g.maxHpBoss||480;
-bossRoot.position.set(px(g.x),1.7+Math.sin(time*5.2+g.seed)*.22,px(g.y));
-bossRoot.rotation.y=Math.atan2(x-bossRoot.position.x,z-bossRoot.position.z);
-bossRoot.rotation.z=g.stun>0?Math.sin(time*18)*.05:Math.sin(time*3+g.seed)*.08;
-let eyeIntensity=3.5*(1+Math.sin(time*10+g.seed)*.4),size=1;
-if(g.state==='lunge'){const t=(g.rush??0)/.5,spike=Math.max(0,t-.7)/.3;size=1.25+spike*.35;eyeIntensity=3.5*(1+spike*2)}
-if(enraged){eyeIntensity=6+Math.sin(time*30)*3;size*=1.15}
-const beingSucked=vac&&lockedGhost===g&&!g.caught&&g.stun>0&&Math.hypot(g.x-player.x,g.y-player.y)<340;
-if(beingSucked){const strain=1-g.hp/gMax,stretch=1.25+Math.sin(time*11+g.seed)*.2+strain*.25;bossRoot.scale.set(size*.85,size*.85,size*stretch)}
-else bossRoot.scale.setScalar(size);
-bossEyeMat.emissiveIntensity=eyeIntensity;
-bossGlowMat.opacity=enraged?1:.92;bossGlowMat.emissiveIntensity=enraged?1.4:.85;
-bossTails.forEach((tail,ti)=>{const ph=g.seed+ti*1.1,tSpeed=beingSucked?16:enraged?12:6,tAmp=beingSucked?.3:.18;tail.rotation.x=Math.sin(time*tSpeed+ph)*tAmp;tail.rotation.y=Math.cos(time*tSpeed*.8+ph)*tAmp*.8;});
-bossLight.intensity=enraged?7:4;
-}
 iceBoltMesh.visible=!!iceBolt;if(iceBolt){iceBoltMesh.position.set(px(iceBolt.x),1.1,px(iceBolt.y));iceBoltMesh.rotation.y=time*6;iceBoltMesh.rotation.x=time*4;}
-tether.visible=!!(vac&&lockedGhost&&!lockedGhost.caught&&lockedGhost.stun>0&&Math.hypot(lockedGhost.x-player.x,lockedGhost.y-player.y)<340);if(tether.visible){const a=new THREE.Vector3(.32,.85,.64);body.localToWorld(a);tether.geometry.setFromPoints([a,new THREE.Vector3(px(lockedGhost.x),1.15,px(lockedGhost.y))]);tether.material.opacity=.7+Math.sin(time*26)*.3;halo.intensity=6+Math.sin(time*22)*2.5;}else halo.intensity=3.5;
+// Claw telegraph for whichever ghost is mid-swipe (melee ghosts or the boss, which has a
+// longer reach and a shorter wind-up - see redSlash() in game.js).
+const slasher=states.find(s=>!s.caught&&(s.slashTime||0)>0&&s.state!=='warning'&&s.state!=='hidden');
+slashIndicator.visible=!!slasher;
+if(slasher){
+  const isBoss=slasher.type==='boss',reach=isBoss?190:125,windup=isBoss?.55:.73,commit=windup*.4;
+  slashIndicator.position.set(px(slasher.x),0,px(slasher.y));
+  slashIndicator.rotation.y=-slasher.slashAngle;
+  slashIndicator.scale.setScalar(reach/125);
+  const st=slasher.slashTime,winding=st>commit;
+  const progress=winding?(windup-st)/(windup-commit):1-st/commit;
+  slashWarningMaterial.opacity=winding?.10+progress*.26:.06;
+  clawMaterial.opacity=winding?0:.85*(1-progress);
+  clawTrails.forEach(claw=>{claw.visible=!winding;claw.rotation.z=progress*1.5-.75});
+  const rig=isBoss?bossRig:ghostRigs[states.indexOf(slasher)];
+  if(rig){const arm=rig.arms[1];arm.rotation.z=winding?2.3:2.3-progress*2.8;arm.rotation.x=winding?-.65:.2}
+}
+updateSuction(time,vac,captureTarget,player);
+halo.intensity=captureTarget?4.5+(captureTarget.tension??0)*1.2:3.5;
 drawParticles(sparkSys,particles.filter(p=>p.kind!=='dust'),p=>.8+p.life*.5);
 drawParticles(dustSys,particles.filter(p=>p.kind==='dust'),p=>.05+p.life*.2);
 noteProp.visible=!!note;if(note){noteProp.position.set(px(note.x),.05+Math.sin(time*2)*.015,px(note.y));noteProp.rotation.y=Math.sin(time*.7)*.2;}
