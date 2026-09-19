@@ -1,0 +1,23 @@
+site_name: Ghostbot · The Little Haunt
+site_description: Auto-generated repository summary for the Ghostbot 3D game project.
+repo_url: https://github.com/brianggggg/TestGhostProject
+repo_name: brianggggg/TestGhostProject
+
+theme:
+  name: material
+  palette:
+    scheme: slate
+    primary: deep purple
+    accent: purple
+  features:
+    - navigation.instant
+    - content.code.copy
+
+nav:
+  - Repo Summary: index.md
+
+markdown_extensions:
+  - tables
+  - fenced_code
+  - toc:
+      permalink: true
