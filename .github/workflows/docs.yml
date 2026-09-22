@@ -42,3 +42,22 @@ jobs:
 
       - name: Deploy to GitHub Pages
         run: mkdocs gh-deploy --force --clean
+
+      - name: Notify claude-plugin-skills-demo to rebuild
+        # Cross-repo test — see that repo's docs/guides/faq.md and
+        # scripts/generate_repo_summary.py (build_cross_repo_test). Keeps
+        # its "items in TestGhostProject" numbers current whenever this
+        # repo's own site deploys, not just when the other repo is pushed
+        # to directly. Needs a CROSS_REPO_DISPATCH_TOKEN secret here — a
+        # PAT (fine-grained: Contents read/write + Actions write on
+        # brianggggg/claude-plugin-skills-demo) — since the default
+        # GITHUB_TOKEN can't trigger workflows in another repo. Silently
+        # skipped if that secret isn't set, so it never fails this repo's
+        # own deploy.
+        if: ${{ secrets.CROSS_REPO_DISPATCH_TOKEN != '' }}
+        run: |
+          curl -sS -X POST \
+            -H "Authorization: Bearer ${{ secrets.CROSS_REPO_DISPATCH_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/brianggggg/claude-plugin-skills-demo/dispatches \
+            -d '{"event_type":"testghostproject-updated"}'
